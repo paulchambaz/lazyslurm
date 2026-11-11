@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -15,28 +16,57 @@ import (
 //go:embed VERSION
 var version string
 
-const usage = `usage: lazyslurm [-hV]
+const usage = `usage: lazyslurm [-hV] [-H HOST] [--json] [--yes] [COMMAND [ARGS]]
 
-A terminal UI for Slurm clusters, opened from a repo.
+A terminal UI for Slurm clusters, opened from a repo. Without a command it
+opens the UI.
 
-  -h  print this help and exit
-  -V  print the version and exit
+commands:
+  status [--all] [JOB]  list the jobs of the journal
+
+options:
+  -h        print this help and exit
+  -V        print the version and exit
+  -H HOST   use this host of .slurm.toml, instead of CLUSTER or the default
+  --json    print JSON Lines
+  --yes     do not ask for confirmation
 `
 
+type usageError string
+
+func (e usageError) Error() string { return string(e) }
+
 func main() {
-	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "lazyslurm:", err)
-		os.Exit(1)
+	err := run(os.Args[1:])
+	if err == nil {
+		return
 	}
+	fmt.Fprintln(os.Stderr, "lazyslurm:", err)
+	if _, ok := errors.AsType[usageError](err); ok {
+		os.Exit(2)
+	}
+	os.Exit(1)
 }
 
 func run(args []string) error {
 	fs := flag.NewFlagSet("lazyslurm", flag.ContinueOnError)
-	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
+	fs.SetOutput(io.Discard)
 	help := fs.Bool("h", false, "")
 	showVersion := fs.Bool("V", false, "")
+	hostFlag := fs.String("H", "", "")
+	asJSON := fs.Bool("json", false, "")
+	fs.Bool("yes", false, "")
+	all := fs.Bool("all", false, "")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return usageError(err.Error())
+	}
+	command, rest := "", fs.Args()
+	if len(rest) > 0 {
+		command = rest[0]
+		if err := fs.Parse(rest[1:]); err != nil {
+			return usageError(err.Error())
+		}
+		rest = fs.Args()
 	}
 	switch {
 	case *help:
@@ -46,7 +76,17 @@ func run(args []string) error {
 		fmt.Println("lazyslurm", strings.TrimSpace(version))
 		return nil
 	}
-	return ui()
+	switch command {
+	case "":
+		return ui()
+	case "status":
+		root, err := repoRoot()
+		if err != nil {
+			return err
+		}
+		return runStatus(os.Stdout, root, *hostFlag, *all, *asJSON, rest)
+	}
+	return usageError(fmt.Sprintf("unknown command %q", command))
 }
 
 func ui() error {

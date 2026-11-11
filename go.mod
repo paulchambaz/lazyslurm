@@ -2,7 +2,10 @@ module github.com/paulchambaz/lazyslurm
 
 go 1.26.7
 
-require github.com/jesseduffield/gocui v0.3.1-0.20260331125330-c81715e95462
+require (
+	github.com/BurntSushi/toml v1.6.0
+	github.com/jesseduffield/gocui v0.3.1-0.20260331125330-c81715e95462
+)
 
 require (
 	github.com/gdamore/encoding v1.0.1 // indirect

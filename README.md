@@ -2,7 +2,7 @@
 
 lazyslurm is a terminal UI for Slurm clusters, in the spirit of lazygit and lazydocker. Opened from a repository, it pushes the code, submits jobs, follows them, pulls the results, retries and cancels. The local repository is the source of truth, and nothing is installed on the clusters: everything goes through `ssh` and `rsync`.
 
-This is an early version: it only draws a window.
+This is an early version: the UI only draws a window, and `lazyslurm status` lists the jobs of the journal.
 
 ## Installation
 
@@ -22,6 +22,7 @@ See the [**Building**](#building) section.
 
 ```sh
 lazyslurm
+lazyslurm status [--all] [--json] [-H HOST] [JOB]
 ```
 
 Press `q` or `ctrl-c` to quit. Everything else is in the [`man`](./lazyslurm.1.scd) page (`man lazyslurm` once installed).

@@ -6,7 +6,7 @@ LAZYSLURM(1) "github.com/paulchambaz/lazyslurm" "General Commands Manual"
 
 # SYNOPSIS
 
-*lazyslurm* [*-hV*]
+*lazyslurm* [*-hV*] [*-H* _HOST_] [*--json*] [*--yes*] [_COMMAND_]
 
 # DESCRIPTION
 
@@ -17,7 +17,15 @@ submit, follow, pull the results, retry and cancel.
 The local repository is the source of truth. Nothing is installed on the
 clusters: everything goes through *ssh* and *rsync*.
 
-This version only draws a window. Press *q* or *ctrl-c* to quit.
+Without a command, the UI opens; it only draws a window for now. Press *q* or
+*ctrl-c* to quit.
+
+# COMMANDS
+
+*status* [*--all*] [_JOB_]
+	List the jobs of the journal, newest first, for the selected host or for
+	all hosts when none is selected. Jobs already seen are hidden unless
+	*--all* is given.
 
 # OPTIONS
 
@@ -27,13 +35,26 @@ This version only draws a window. Press *q* or *ctrl-c* to quit.
 *-V*
 	Print the version and exit.
 
+*-H* _HOST_
+	Use this host of _.slurm.toml_, instead of the *CLUSTER* environment
+	variable or the default host.
+
+*--json*
+	Print JSON Lines.
+
+*--yes*
+	Do not ask for confirmation.
+
 # FILES
 
 _.slurm.toml_
 	How the project uses Slurm: hosts, what to push and pull.
 
-_outputs/slurms.jsonl_
+_.slurm/jobs.jsonl_
 	Log of the submissions, one JSON object per line.
+
+_.slurm/seen_
+	Jobs already shown in a final state.
 
 # SEE ALSO
 
