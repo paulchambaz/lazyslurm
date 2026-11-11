@@ -11,7 +11,7 @@ import (
 func TestLocalHookRunsInDirWithEnv(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
-	if err := localHook(&out, "pre_push", dir, `pwd; echo "$GIT_COMMIT $GIT_DIRTY"; echo err >&2`, hookEnv("abc", true)); err != nil {
+	if err := localHook(&out, "pre_push", dir, `pwd; echo "$GIT_COMMIT $GIT_DIRTY"; echo err >&2`, hookEnv("abc", true, "h")); err != nil {
 		t.Fatal(err)
 	}
 	if got := out.String(); !strings.Contains(got, dir+"\nabc 1\n") || !strings.Contains(got, "err") {
@@ -41,7 +41,7 @@ func TestTargetHookRunsInDirWithEnv(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out bytes.Buffer
-		if err := targetHook(&out, "post_push", tg, dir, `pwd; echo "$GIT_COMMIT $GIT_DIRTY"`, hookEnv("abc", false)); err != nil {
+		if err := targetHook(&out, "post_push", tg, dir, `pwd; echo "$GIT_COMMIT $GIT_DIRTY"`, hookEnv("abc", false, "h")); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		if got := out.String(); !strings.Contains(got, dir+"\nabc 0\n") {

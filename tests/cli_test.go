@@ -320,3 +320,53 @@ func TestVerbsEndToEnd(t *testing.T) {
 		t.Errorf("exec exit 7: exit %d", code)
 	}
 }
+
+func TestCleanEndToEnd(t *testing.T) {
+	fake := fakeSlurm(t)
+	dir, target := repo(t), filepath.Join(t.TempDir(), "target")
+	write(t, filepath.Join(dir, ".slurm", "config"), "[default]\npush = [\"src\"]\nkeep = [\"outputs\"]\n"+
+		"pull = [\"outputs\"]\nclean = [\"outputs/{job}\"]\n[hosts.a]\ntarget = \""+target+"\"\n")
+	write(t, filepath.Join(dir, "src", "run.sh"), "#!/bin/sh\n")
+	commitAll(t, dir)
+
+	if _, stderr, code := lazyslurm(t, dir, "--yes", "submit", "src/run.sh"); code != 0 {
+		t.Fatalf("submit: exit %d, %q", code, stderr)
+	}
+	write(t, filepath.Join(target, "keep", "outputs", "100", "w.bin"), "weights\n")
+	write(t, filepath.Join(target, "keep", "outputs", "200", "w.bin"), "not a job of ours\n")
+	write(t, filepath.Join(fake, "sacct"), "100|COMPLETED\n")
+	if _, stderr, code := lazyslurm(t, dir, "pull"); code != 0 {
+		t.Fatalf("pull: exit %d, %q", code, stderr)
+	}
+
+	if _, stderr, code := lazyslurm(t, dir, "clean"); code != 3 || !strings.Contains(stderr, "--yes") {
+		t.Errorf("clean without --yes: exit %d, %q", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(target, "keep", "outputs", "100")); err != nil {
+		t.Fatal("an unconfirmed clean deleted the run")
+	}
+	if _, _, code := lazyslurm(t, dir, "clean", "x"); code != 2 {
+		t.Errorf("clean with an argument: exit %d, want 2", code)
+	}
+	out, stderr, code := lazyslurm(t, dir, "--yes", "clean")
+	if code != 0 || !strings.HasPrefix(out, "cleaned 1 runs on a (") || !strings.Contains(stderr, "outputs/100") {
+		t.Fatalf("clean = %q, %q, exit %d", out, stderr, code)
+	}
+	if _, err := os.Stat(filepath.Join(target, "keep", "outputs", "100")); err == nil {
+		t.Error("the run is still on the target")
+	}
+	if _, err := os.Stat(filepath.Join(target, "keep", "outputs", "200", "w.bin")); err != nil {
+		t.Error("a run unknown to the journal was deleted")
+	}
+	if got, err := os.ReadFile(filepath.Join(dir, "outputs", "100", "w.bin")); err != nil || string(got) != "weights\n" {
+		t.Errorf("local copy = %q, %v", got, err)
+	}
+	if out, _, code = lazyslurm(t, dir, "--yes", "clean"); code != 0 || out != "nothing to clean\n" {
+		t.Errorf("second clean = %q, exit %d", out, code)
+	}
+
+	write(t, filepath.Join(dir, ".slurm", "config"), "[default]\npush = [\"src\"]\n[hosts.a]\ntarget = \""+target+"\"\n")
+	if _, stderr, code := lazyslurm(t, dir, "--yes", "clean"); code != 1 || !strings.Contains(stderr, "no clean key") {
+		t.Errorf("clean without a key: exit %d, %q", code, stderr)
+	}
+}

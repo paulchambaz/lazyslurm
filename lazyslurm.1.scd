@@ -91,6 +91,19 @@ Without a command, the UI opens. See *THE UI*.
 	the snapshot costs beyond *work/* and the older snapshots. Stray files are
 	listed below it.
 
+*clean*
+	Delete from _keep/_ on the target the outputs already in the repository, as
+	listed by the *clean* key of the host: each entry is a path _DIR/{job}_,
+	and every subfolder of _DIR_ named after a Slurm job id is one run, so the
+	scripts must write under the id (_$SLURM_ARRAY_JOB_ID_ for an array). A run
+	is deleted only when it is a real directory, its job is in the journal of
+	the host, every task of the job is in a final state, and an *rsync* dry run
+	of it to the repository would transfer nothing. Failed and cancelled runs
+	are deleted like the others. Anything else is left alone. If *sacct* or
+	*squeue* fails, nothing is deleted. Lists the runs with their sizes.
+	Confirmed. Hooks get *CLUSTER*, so *post_pull* can run
+	_lazyslurm clean --yes_.
+
 *drop* _COMMIT_
 	Delete a snapshot, given by a hash prefix. Refused when a job is active in
 	it. Stray files are not a reason to refuse. Confirmed.
@@ -155,6 +168,10 @@ cluster.
 
 *d*
 	Drop the selected snapshot, after a confirmation.
+
+*C*
+	Clean: list the outputs *clean* would delete in the log panel, then delete
+	them after a confirmation.
 
 *?*
 	Show the keys.

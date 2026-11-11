@@ -18,6 +18,8 @@ const (
 	oldConfigFile = ".slurm.toml"
 )
 
+const jobToken = "{job}"
+
 var errNoHost = errors.New("no host selected")
 
 // Target is where lazyslurm works on a host, over ssh when Alias is set.
@@ -34,6 +36,7 @@ type Config struct {
 	Exclude  []string
 	Keep     []string
 	Pull     []string
+	Clean    []string
 	Scripts  []string
 	Prelude  string
 	Srun     string
@@ -51,6 +54,7 @@ type table struct {
 	Exclude  []string
 	Keep     []string
 	Pull     []string
+	Clean    []string
 	Scripts  []string
 	Prelude  *string
 	Srun     *string
@@ -185,6 +189,7 @@ func merge(name string, def, host table) (Config, error) {
 		Exclude:  list(host.Exclude, def.Exclude),
 		Keep:     list(host.Keep, def.Keep),
 		Pull:     list(host.Pull, def.Pull),
+		Clean:    list(host.Clean, def.Clean),
 		Scripts:  list(host.Scripts, def.Scripts),
 		Prelude:  pick(host.Prelude, def.Prelude),
 		Srun:     pick(host.Srun, def.Srun),
@@ -249,6 +254,13 @@ func validate(c *Config) error {
 		if !insideAny(p, c.Keep) {
 			return fmt.Errorf("pull: %q is not inside a keep path", p)
 		}
+	}
+	for i, p := range c.Clean {
+		parent, ok := strings.CutSuffix(p, "/"+jobToken)
+		if !ok || strings.Contains(parent, jobToken) || badPath(parent) || !insideAny(filepath.Clean(parent), c.Keep) {
+			return fmt.Errorf("clean: %q must be a path inside a keep path, ending in /%s", p, jobToken)
+		}
+		c.Clean[i] = filepath.Clean(parent) + "/" + jobToken
 	}
 	for _, e := range c.Exclude {
 		if strings.Contains(e, "/") {

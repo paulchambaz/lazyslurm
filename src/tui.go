@@ -38,7 +38,7 @@ var spinFrames = []string{"●∙∙", "∙●∙", "∙∙●", "∙●∙"}
 
 var taskNames = map[string]string{
 	"push": "Pushing", "pull": "Pulling", "submit": "Submitting", "retry": "Retrying",
-	"cancel": "Cancelling", "drop": "Dropping", "logs": "Reading logs", "refresh": "Refreshing",
+	"cancel": "Cancelling", "clean": "Cleaning", "drop": "Dropping", "logs": "Reading logs", "refresh": "Refreshing",
 }
 
 var panelViews = [panelCount]string{"hosts", "jobs", "snaps"}
@@ -58,6 +58,7 @@ const helpText = ` 1 2 3  [ ]  tab   go to a panel
  r  c              retry, cancel the selected job
  L                 read the log of the selected job
  d                 drop the selected snapshot
+ C                 delete the outputs of finished jobs already pulled
  q  ctrl-c         quit
 `
 
@@ -444,6 +445,45 @@ func (u *tui) drop() error {
 	return nil
 }
 
+func (u *tui) clean() error {
+	if !u.idle() {
+		return nil
+	}
+	root, host, cfg := u.m.root, u.m.host, u.m.cfg
+	if len(cfg.Clean) == 0 {
+		u.log.add("error: clean: no clean key for this host in " + configFile)
+		return nil
+	}
+	var items []cleanItem
+	var planned error
+	u.start("clean", func() error {
+		items, planned = planClean(root, cfg)
+		return planned
+	}, func() {
+		if planned != nil {
+			return
+		}
+		if len(items) == 0 {
+			u.log.add("nothing to clean")
+			return
+		}
+		if err := listClean(u.log, items); err != nil {
+			u.log.add("error: clean: " + err.Error())
+			return
+		}
+		u.confirm(fmt.Sprintf("delete %d runs on %s (%s)?", len(items), host, human(cleanTotal(items))), func() {
+			u.verb("clean", func(w io.Writer) error {
+				if err := deleteClean(cfg, items); err != nil {
+					return err
+				}
+				_, err := fmt.Fprintf(w, "cleaned %d runs on %s\n", len(items), host)
+				return err
+			})
+		})
+	})
+	return nil
+}
+
 func (u *tui) logsOf() error {
 	j, ok := u.m.job()
 	if !ok || !u.idle() {
@@ -549,6 +589,7 @@ func (u *tui) bind() error {
 		{'0', u.focusMain},
 		{gocui.KeyEsc, u.back},
 		{'d', u.drop},
+		{'C', u.clean},
 		{'q', quit},
 	}
 	for _, k := range keys {

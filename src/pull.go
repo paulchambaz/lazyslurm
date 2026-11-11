@@ -91,7 +91,7 @@ func pullFrom(hooks io.Writer, root string, cfg Config) (paths, dropped int, err
 	if err != nil {
 		return 0, 0, err
 	}
-	env := hookEnv(commit, isDirty)
+	env := hookEnv(commit, isDirty, cfg.Host)
 	dir, err := cfg.Target.resolve()
 	if err != nil {
 		return 0, 0, err

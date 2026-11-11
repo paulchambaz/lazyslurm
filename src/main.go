@@ -16,7 +16,7 @@ import (
 var version string
 
 var commands = []string{
-	"cancel", "drop", "exec", "logs", "pull", "push", "retry", "snapshots", "status", "submit",
+	"cancel", "clean", "drop", "exec", "logs", "pull", "push", "retry", "snapshots", "status", "submit",
 }
 
 const usage = `usage: lazyslurm [-hV] [-H HOST] [--json] [--yes] [COMMAND [ARGS]]
@@ -26,6 +26,7 @@ opens the UI.
 
 commands:
   cancel JOB[_TASK]     cancel an active job
+  clean                 delete the outputs of finished jobs already pulled
   drop COMMIT           delete a snapshot, by hash prefix
   exec [--] COMMAND...  run COMMAND in work/ on a short allocation
   logs [-f] [--err] JOB[_TASK]
@@ -116,6 +117,8 @@ func run(args []string) error {
 	switch command {
 	case "cancel":
 		return runCancel(os.Stdout, root, *hostFlag, ask, *asJSON, rest)
+	case "clean":
+		return runClean(os.Stdout, root, *hostFlag, ask, *asJSON, rest)
 	case "drop":
 		return runDrop(os.Stdout, root, *hostFlag, ask, *asJSON, rest)
 	case "exec":

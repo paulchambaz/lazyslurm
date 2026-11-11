@@ -210,7 +210,7 @@ func syncUp(w io.Writer, root string, cfg Config, snap bool) (synced, error) {
 	if err := requireClean(root, cfg); err != nil {
 		return synced{}, err
 	}
-	env := hookEnv(commit, false)
+	env := hookEnv(commit, false, cfg.Host)
 	if err := localHook(w, "pre_push", root, cfg.PrePush, env); err != nil {
 		return synced{}, err
 	}

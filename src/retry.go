@@ -211,7 +211,7 @@ func runRetry(w io.Writer, root, hostFlag string, ask confirmer, asJSON bool, ar
 		return fmt.Errorf("retry on %s: %w", cfg.Host, err)
 	}
 	snap := dir + "/" + commit
-	if err := targetHook(hookOut, "post_push", cfg.Target, snap, cfg.PostPush, hookEnv(commit, false)); err != nil {
+	if err := targetHook(hookOut, "post_push", cfg.Target, snap, cfg.PostPush, hookEnv(commit, false, cfg.Host)); err != nil {
 		return err
 	}
 	extra := orig.Sbatch
