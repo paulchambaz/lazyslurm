@@ -26,7 +26,7 @@
         pname = "lazyslurm";
         version = pkgs.lib.removeSuffix "\n" (builtins.readFile ./src/VERSION);
         src = ./.;
-        vendorHash = "sha256-xLKN8UDVzxr31xK48Hx4zMWlKvg1hxTw+aIcXMUaewY=";
+        vendorHash = "sha256-phS6b2DODwgXh68xECQMLNS4FwjtYPuX4G4XJcJi4oY=";
         subPackages = ["src"];
 
         nativeBuildInputs = buildPkgs;
