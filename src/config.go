@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,7 +13,10 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const configFile = ".slurm.toml"
+const (
+	configFile    = ".slurm/config"
+	oldConfigFile = ".slurm.toml"
+)
 
 var errNoHost = errors.New("no host selected")
 
@@ -22,7 +26,7 @@ type Target struct {
 	Dir   string
 }
 
-// Config is the .slurm.toml of a repo resolved for one host.
+// Config is the .slurm/config of a repo resolved for one host.
 type Config struct {
 	Host     string
 	Target   Target
@@ -64,6 +68,11 @@ type file struct {
 
 func parseConfig(root string) (file, error) {
 	data, err := os.ReadFile(filepath.Join(root, configFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		if _, oldErr := os.Stat(filepath.Join(root, oldConfigFile)); oldErr == nil {
+			return file{}, fmt.Errorf("%s moved to %s: move it there", oldConfigFile, configFile)
+		}
+	}
 	if err != nil {
 		return file{}, fmt.Errorf("read %s: %w", configFile, err)
 	}
@@ -102,7 +111,7 @@ func loadConfig(root, hostFlag string) (Config, error) {
 	return cfg, validate(&cfg)
 }
 
-// hostList returns the hosts of .slurm.toml and the selected one, the first when none is.
+// hostList returns the hosts of .slurm/config and the selected one, the first when none is.
 func hostList(root, hostFlag string) ([]string, string, error) {
 	f, err := parseConfig(root)
 	if err != nil {

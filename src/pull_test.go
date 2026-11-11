@@ -39,18 +39,18 @@ func TestPullFetchesPathsAndLogsInOrder(t *testing.T) {
 			t.Errorf("%s: pre_pull did not run in work/", name)
 		}
 		for path, want := range map[string]string{
-			"outputs/logs/sub/a.txt":      "log\n",
-			"outputs/logs/local.txt":      "mine\n",
-			"saw.txt":                     "log\n",
-			".slurm/logs/abc/slurm-5.out": "partial\n",
-			".slurm/logs/abc/slurm-5.err": "e\n",
+			"outputs/logs/sub/a.txt":            "log\n",
+			"outputs/logs/local.txt":            "mine\n",
+			"saw.txt":                           "log\n",
+			".slurm/state/logs/abc/slurm-5.out": "partial\n",
+			".slurm/state/logs/abc/slurm-5.err": "e\n",
 		} {
 			if got, _ := os.ReadFile(filepath.Join(root, path)); string(got) != want {
 				t.Errorf("%s: %s = %q, want %q", name, path, got, want)
 			}
 		}
-		for _, path := range []string{"outputs/weights", "outputs/missing", ".slurm/logs/abc/other.txt",
-			".slurm/logs/abc/src", ".slurm/logs/work", ".slurm/logs/keep"} {
+		for _, path := range []string{"outputs/weights", "outputs/missing", ".slurm/state/logs/abc/other.txt",
+			".slurm/state/logs/abc/src", ".slurm/state/logs/work", ".slurm/state/logs/keep"} {
 			if exists(filepath.Join(root, path)) {
 				t.Errorf("%s: %s must not be pulled", name, path)
 			}
@@ -71,7 +71,7 @@ func TestFailingPrePullPullsNothing(t *testing.T) {
 		if _, err := pull(root); err == nil || !strings.Contains(err.Error(), "pre_pull") {
 			t.Errorf("%s: err = %v", name, err)
 		}
-		for _, path := range []string{"outputs", ".slurm", "post_ran"} {
+		for _, path := range []string{"outputs", ".slurm/state", "post_ran"} {
 			if exists(filepath.Join(root, path)) {
 				t.Errorf("%s: %s exists after a failed pre_pull", name, path)
 			}
@@ -114,13 +114,13 @@ func TestPullDeletesNothingWhenSomethingFails(t *testing.T) {
 			t.Errorf("%s: err = %v", name, err)
 		}
 		write(t, filepath.Join(fake, "fail-sacct"), "")
-		if err := os.RemoveAll(filepath.Join(root, ".slurm", "logs")); err != nil {
+		if err := os.RemoveAll(filepath.Join(root, ".slurm", "state", "logs")); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pull(root); err == nil || !strings.Contains(err.Error(), "sacct") {
 			t.Errorf("%s: err = %v", name, err)
 		}
-		if exists(filepath.Join(root, ".slurm", "logs")) {
+		if exists(filepath.Join(root, ".slurm", "state", "logs")) {
 			t.Errorf("%s: a failed state fetch must stop the pull before any rsync", name)
 		}
 		for _, c := range commits {

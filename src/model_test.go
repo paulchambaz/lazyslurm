@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -84,8 +85,8 @@ func TestDetailTexts(t *testing.T) {
 
 func TestJobLineIsIdNameAndCounts(t *testing.T) {
 	m := testModel()
-	got := plain(m.jobLine(m.jobs[0], 30, 2, 7))
-	if utf8.RuneCountInString(got) != 30 || !strings.HasPrefix(got, "12  train.sh ") || !strings.HasSuffix(got, "  [1]    ") {
+	got := plain(m.jobLine(m.jobs[0], 30, 2, 3))
+	if utf8.RuneCountInString(got) != 30 || !strings.HasPrefix(got, "12  train.sh ") || !strings.HasSuffix(got, "  [1]") {
 		t.Errorf("running job line = %q", got)
 	}
 	m.states["11"] = jobState{States: map[string]int{"COMPLETED": 34, "FAILED": 1, "CANCELLED": 2}, Final: true}
@@ -115,5 +116,15 @@ func TestEllipsizeKeepsTheEnd(t *testing.T) {
 		if got := ellipsize(c.in, c.n); got != c.want {
 			t.Errorf("ellipsize(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
 		}
+	}
+}
+
+func TestWhenIsReadable(t *testing.T) {
+	stamp := time.Date(2026, 11, 11, 15, 37, 2, 0, time.Local).Format(time.RFC3339)
+	if got := when(stamp); got != "15:37 Wed 11 Nov 2026" {
+		t.Errorf("when = %q", got)
+	}
+	if got := when("garbage"); got != "garbage" {
+		t.Errorf("when(garbage) = %q", got)
 	}
 }

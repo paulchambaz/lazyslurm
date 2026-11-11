@@ -52,9 +52,11 @@ func TestAppendJobCreatesStateDir(t *testing.T) {
 	if err := appendJob(root, Job{Job: "1"}); err != nil {
 		t.Fatal(err)
 	}
-	ignore, err := os.ReadFile(filepath.Join(root, ".slurm", ".gitignore"))
-	if err != nil || string(ignore) != "*\n" {
-		t.Errorf(".gitignore = %q, %v", ignore, err)
+	if _, err := os.Stat(filepath.Join(root, ".slurm", "state", "jobs.jsonl")); err != nil {
+		t.Errorf("journal: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".slurm", ".gitignore")); err == nil {
+		t.Error("no .gitignore must be written")
 	}
 }
 

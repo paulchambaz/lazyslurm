@@ -30,7 +30,7 @@ func TestLogsTriesSlurmThenTheSnapshotThenTheLocalCopy(t *testing.T) {
 		write(t, filepath.Join(dir, commit, "slurm-100.out"), "from snapshot\n")
 		write(t, filepath.Join(dir, commit, "slurm-100.err"), "err from snapshot\n")
 		write(t, filepath.Join(dir, commit, "slurm-100_3.out"), "task\n")
-		write(t, filepath.Join(root, ".slurm", "logs", commit, "slurm-100.out"), "from local\n")
+		write(t, filepath.Join(root, ".slurm", "state", "logs", commit, "slurm-100.out"), "from local\n")
 		for _, step := range []struct {
 			stderr bool
 			id     string

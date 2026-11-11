@@ -42,7 +42,7 @@ commands:
 options:
   -h        print this help and exit
   -V        print the version and exit
-  -H HOST   use this host of .slurm.toml, instead of CLUSTER or the default
+  -H HOST   use this host of .slurm/config, instead of CLUSTER or the default
   --json    print JSON Lines
   --yes     do not ask for confirmation (without a terminal, the commands
             that change the cluster exit 3 instead)

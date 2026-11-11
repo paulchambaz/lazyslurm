@@ -49,7 +49,7 @@ Without a command, the UI opens. See *THE UI*.
 	Run *pre_pull* on the target in *work/*, bring back the *pull* paths from
 	*keep/* into the repository (nothing is deleted locally, missing paths are
 	skipped), copy the _slurm-\*.out_ and _slurm-\*.err_ files of the snapshots
-	to _.slurm/logs/COMMIT/_, then run *post_pull* locally. The first failing
+	to _.slurm/state/logs/COMMIT/_, then run *post_pull* locally. The first failing
 	step stops the rest. The states of the jobs are read first, and at the
 	end the snapshots that are done are deleted: every job of the commit is
 	final, no job in the queue works inside it, and it holds no stray file (a
@@ -75,7 +75,7 @@ Without a command, the UI opens. See *THE UI*.
 *logs* [*-f*] [*--err*] _JOB_[_\_TASK_]
 	Print the standard output of a job, or with *--err* its standard error.
 	It is read from the path *scontrol* reports, else from the snapshot on the
-	target, else from _.slurm/logs/COMMIT/_ after a pull. With *-f* the file
+	target, else from _.slurm/state/logs/COMMIT/_ after a pull. With *-f* the file
 	is followed until interrupted; the job must have started.
 
 *exec* [*--*] _COMMAND_...
@@ -143,7 +143,7 @@ cluster.
 
 *:*
 	Type a command and run it in _work/_ with *srun*, as *exec* does. Past
-	commands are listed below the prompt, kept in _.slurm/history_; *tab* moves
+	commands are listed below the prompt, kept in _.slurm/state/history_; *tab* moves
 	to the list and *enter* copies one into the prompt. The UI steps aside,
 	shows the output, and comes back on *enter*.
 
@@ -176,7 +176,7 @@ wheel scroll it; *esc* goes back. Clicks on views under a popup are ignored.
 	Print the version and exit.
 
 *-H* _HOST_
-	Use this host of _.slurm.toml_, instead of the *CLUSTER* environment
+	Use this host of _.slurm/config_, instead of the *CLUSTER* environment
 	variable or the default host.
 
 *--json*
@@ -195,17 +195,23 @@ command.
 
 # FILES
 
-_.slurm.toml_
-	How the project uses Slurm: hosts, what to push and pull.
+_.slurm/config_
+	How the project uses Slurm: hosts, what to push and pull. Meant to be
+	tracked by git, with any hook script the project keeps in _.slurm/_.
 
-_.slurm/jobs.jsonl_
+_.slurm/state/jobs.jsonl_
 	Log of the submissions, one JSON object per line.
 
-_.slurm/seen_
+_.slurm/state/seen_
 	Jobs already shown in a final state.
 
-_.slurm/history_
+_.slurm/state/history_
 	Commands typed after *:* in the UI, one per line.
+
+_.slurm/state/_
+	Everything lazyslurm writes that is local to the machine: the journal,
+	_seen_, _history_ and the collected logs. Not worth tracking: add
+	_.slurm/state/_ to the _.gitignore_ of the project.
 
 # SEE ALSO
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -32,9 +31,7 @@ post_push = ""
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, configFile), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	write(t, filepath.Join(root, configFile), body)
 	return root
 }
 
@@ -186,6 +183,14 @@ func TestPathsAreCleaned(t *testing.T) {
 
 func TestMissingConfigFile(t *testing.T) {
 	if _, err := loadConfig(t.TempDir(), ""); err == nil || !strings.Contains(err.Error(), configFile) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestOldConfigLocationIsReported(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, oldConfigFile), validConfig)
+	if _, err := loadConfig(root, ""); err == nil || !strings.Contains(err.Error(), "move it there") {
 		t.Errorf("err = %v", err)
 	}
 }

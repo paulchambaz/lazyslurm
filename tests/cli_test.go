@@ -131,16 +131,16 @@ func TestUnknownCommandExitsWithUsageCode(t *testing.T) {
 func TestStatusListsTheJournal(t *testing.T) {
 	fakeSlurm(t)
 	dir := repo(t)
-	write(t, filepath.Join(dir, ".slurm.toml"), `
+	write(t, filepath.Join(dir, ".slurm", "config"), `
 [default]
 push = ["src"]
 [hosts.a]
 target = "/scratch/x"
 `)
-	write(t, filepath.Join(dir, ".slurm", "jobs.jsonl"),
+	write(t, filepath.Join(dir, ".slurm", "state", "jobs.jsonl"),
 		`{"v":3,"time":"t1","host":"a","job":"1","script":"s.sh","commit":"0123456789abcdef"}`+"\n"+
 			`{"v":3,"time":"t2","host":"a","job":"2","script":"s.sh","commit":"0123456789abcdef"}`+"\n")
-	write(t, filepath.Join(dir, ".slurm", "seen"), "a 1\n")
+	write(t, filepath.Join(dir, ".slurm", "state", "seen"), "a 1\n")
 
 	out, _, code := lazyslurm(t, dir, "status")
 	if code != 0 || out != "2  t2  s.sh  01234567\n" {
@@ -165,7 +165,7 @@ func TestStatusOutsideARepoFails(t *testing.T) {
 
 func TestStatusReportsABrokenConfig(t *testing.T) {
 	dir := repo(t)
-	write(t, filepath.Join(dir, ".slurm.toml"), "[default]\nbogus = 1\n")
+	write(t, filepath.Join(dir, ".slurm", "config"), "[default]\nbogus = 1\n")
 	_, stderr, code := lazyslurm(t, dir, "status")
 	if code != 1 || !strings.Contains(stderr, "bogus") {
 		t.Errorf("exit %d, stderr %q", code, stderr)
@@ -175,7 +175,7 @@ func TestStatusReportsABrokenConfig(t *testing.T) {
 func pushRepo(t *testing.T) (dir, target string) {
 	t.Helper()
 	dir, target = repo(t), filepath.Join(t.TempDir(), "target")
-	write(t, filepath.Join(dir, ".slurm.toml"), "[default]\npush = [\"src\"]\n[hosts.a]\ntarget = \""+target+"\"\n")
+	write(t, filepath.Join(dir, ".slurm", "config"), "[default]\npush = [\"src\"]\n[hosts.a]\ntarget = \""+target+"\"\n")
 	write(t, filepath.Join(dir, "src", "a.py"), "a\n")
 	commitAll(t, dir)
 	return dir, target
@@ -204,7 +204,7 @@ func TestPushErrors(t *testing.T) {
 	if _, stderr, code := lazyslurm(t, dir, "-H", "nope", "push"); code != 1 || !strings.Contains(stderr, "a") {
 		t.Errorf("-H nope: exit %d, stderr %q", code, stderr)
 	}
-	if _, stderr, code := lazyslurm(t, repo(t), "push"); code != 1 || !strings.Contains(stderr, ".slurm.toml") {
+	if _, stderr, code := lazyslurm(t, repo(t), "push"); code != 1 || !strings.Contains(stderr, ".slurm/config") {
 		t.Errorf("no config: exit %d, stderr %q", code, stderr)
 	}
 }
@@ -226,7 +226,7 @@ func TestSubmitStatusAndPullEndToEnd(t *testing.T) {
 	if code != 0 || out != "job 100 submitted on a\n" {
 		t.Fatalf("submit = %q, %q, exit %d", out, stderr, code)
 	}
-	journal, err := os.ReadFile(filepath.Join(dir, ".slurm", "jobs.jsonl"))
+	journal, err := os.ReadFile(filepath.Join(dir, ".slurm", "state", "jobs.jsonl"))
 	if err != nil || !strings.Contains(string(journal), `"args":["-x"]`) || !strings.Contains(string(journal), `"note":"first"`) {
 		t.Errorf("journal = %q, %v", journal, err)
 	}
@@ -258,7 +258,7 @@ func TestSubmitStatusAndPullEndToEnd(t *testing.T) {
 func TestVerbsEndToEnd(t *testing.T) {
 	fake := fakeSlurm(t)
 	dir, target := pushRepo(t)
-	write(t, filepath.Join(dir, ".slurm.toml"), "[default]\npush = [\"src\"]\nsrun = \"--time=1\"\n[hosts.a]\ntarget = \""+target+"\"\n")
+	write(t, filepath.Join(dir, ".slurm", "config"), "[default]\npush = [\"src\"]\nsrun = \"--time=1\"\n[hosts.a]\ntarget = \""+target+"\"\n")
 	write(t, filepath.Join(dir, "src", "run.sh"), "#!/bin/sh\n")
 	commitAll(t, dir)
 	if _, stderr, code := lazyslurm(t, dir, "--yes", "submit", "src/run.sh"); code != 0 {

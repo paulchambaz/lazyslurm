@@ -915,7 +915,7 @@ func (u *tui) layout(g *gocui.Gui) error {
 		lines := m.hostLines()
 		switch p {
 		case jobsPanel:
-			lines = m.jobLines(v.InnerWidth() - 1)
+			lines = m.jobLines(v.InnerWidth() - 2)
 		case snapsPanel:
 			lines = m.snapLines()
 		}

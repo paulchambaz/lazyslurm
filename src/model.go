@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -193,7 +194,7 @@ func ellipsize(s string, n int) string {
 
 func (m *model) jobLine(j Job, width, idWidth, countsWidth int) string {
 	counts := compactCounts(m.states[j.Job].States)
-	counts += strings.Repeat(" ", countsWidth-utf8.RuneCountInString(plainText(counts)))
+	counts = strings.Repeat(" ", countsWidth-utf8.RuneCountInString(plainText(counts))) + counts
 	room := width - idWidth - countsWidth - 4
 	name := ""
 	if room > 0 {
@@ -201,6 +202,15 @@ func (m *model) jobLine(j Job, width, idWidth, countsWidth int) string {
 		name += strings.Repeat(" ", room-utf8.RuneCountInString(name))
 	}
 	return paint(yellow, j.Job+strings.Repeat(" ", idWidth-len(j.Job))) + "  " + name + "  " + counts
+}
+
+// when formats an RFC 3339 stamp in local time as "15:37 Wed 11 Nov 2026", or returns it unchanged.
+func when(stamp string) string {
+	t, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return stamp
+	}
+	return t.Local().Format("15:04 Mon 2 Jan 2006")
 }
 
 func snapLine(s snapshotInfo) string {
@@ -268,7 +278,7 @@ func (m *model) detail() (title, text string) {
 			return "Job", ""
 		}
 		b.WriteString(field("job", j.Job+" on "+j.Host))
-		b.WriteString(field("time", j.Time))
+		b.WriteString(field("time", when(j.Time)))
 		b.WriteString(field("script", j.Script+" "+strings.Join(j.Args, " ")))
 		b.WriteString(field("commit", cmp.Or(m.commit[j.Commit], j.Commit)))
 		for _, f := range []struct{ name, value string }{

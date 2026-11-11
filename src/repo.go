@@ -38,18 +38,15 @@ func repoRoot() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// stateDir is where lazyslurm keeps what is local to this machine and not worth tracking.
 func stateDir(root string) string {
-	return filepath.Join(root, ".slurm")
+	return filepath.Join(root, ".slurm", "state")
 }
 
 func ensureStateDir(root string) error {
 	dir := stateDir(root)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
-	}
-	ignore := filepath.Join(dir, ".gitignore")
-	if err := os.WriteFile(ignore, []byte("*\n"), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", ignore, err)
 	}
 	return nil
 }

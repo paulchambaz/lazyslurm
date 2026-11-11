@@ -41,7 +41,7 @@ func TestRetryResubmitsFailedTasksOfAnArray(t *testing.T) {
 		if len(recs) != 2 || recs[1] != want {
 			t.Errorf("%s: sbatch saw %q, want %q", name, recs, want)
 		}
-		journal, _ := os.ReadFile(filepath.Join(root, ".slurm", "jobs.jsonl"))
+		journal, _ := os.ReadFile(filepath.Join(root, ".slurm", "state", "jobs.jsonl"))
 		lines := strings.Split(strings.TrimSpace(string(journal)), "\n")
 		last := lines[len(lines)-1]
 		for _, want := range []string{`"job":"101"`, `"retry_of":"100"`, `"array":"2,10"`, `"sbatch":"--time=1"`, `"args":["arg"]`} {
