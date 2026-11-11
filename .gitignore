@@ -1,0 +1,6 @@
+/bin
+/result*
+/.direnv
+/lazyslurm.1
+*.md
+!README.md
