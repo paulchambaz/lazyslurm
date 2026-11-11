@@ -30,6 +30,7 @@
         subPackages = ["src"];
 
         nativeBuildInputs = buildPkgs;
+        nativeCheckInputs = with pkgs; [git rsync openssh util-linux];
 
         postInstall = ''
           mv $out/bin/src $out/bin/lazyslurm
