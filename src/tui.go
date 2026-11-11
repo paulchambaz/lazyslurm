@@ -892,7 +892,7 @@ func (u *tui) layout(g *gocui.Gui) error {
 			m.clamp()
 		}
 	}
-	left := max(w/3, 24)
+	left := max(w/3, 24) + 1
 	rows := h - 1
 	hostsEnd := min(len(m.hosts), 3) + 2
 	free := rows - hostsEnd
