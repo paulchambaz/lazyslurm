@@ -20,3 +20,9 @@ man:
 install prefix=(env_var('HOME') + '/.local'): build man
   install -Dm755 bin/lazyslurm {{ prefix }}/bin/lazyslurm
   install -Dm644 lazyslurm.1 {{ prefix }}/share/man/man1/lazyslurm.1
+
+demo: build
+  demo/demo.sh
+
+demo-gif: build
+  vhs demo/demo.tape

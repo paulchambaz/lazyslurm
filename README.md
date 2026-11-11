@@ -6,6 +6,8 @@ A job runs in an immutable snapshot of the commit you submitted, not in the fold
 
 The UI and the command line do the same things: the UI is built on the same functions, so a script or an agent can do all that you do by hand.
 
+![](./demo/demo.gif)
+
 ## Installation
 
 ### Nix
@@ -146,6 +148,7 @@ just build
 just test
 just lint
 just install # binary and man page in ~/.local
+just demo # try lazyslurm on a made-up project, no cluster needed
 ```
 
 ## Contribution
