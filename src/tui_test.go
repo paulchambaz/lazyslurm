@@ -27,7 +27,7 @@ func newTestTUI(t *testing.T, root string) *tui {
 	u := newTUI(g, root, hosts, host, cfg)
 	u.post = func(f func()) { f() }
 	u.log.wake = nil
-	t.Cleanup(func() { hookOut, trace = os.Stderr, nil })
+	t.Cleanup(func() { hookOut = os.Stderr })
 	hookOut = u.log
 	return u
 }
@@ -197,20 +197,19 @@ func TestSubmitFlowAsksEverythingThenSubmits(t *testing.T) {
 	}
 }
 
-func TestHookOutputAndCommandsGoToTheLog(t *testing.T) {
+func TestHookOutputAndResultsGoToTheLogButNotTheCommands(t *testing.T) {
 	setupFakeSlurm(t)
 	u := newTestTUI(t, scriptRepo(t, "pre_push = \"echo hooked\"\n"))
-	trace = u.trace
 	u.push()
 	u.settle(t)
 	text := u.logText()
-	for _, want := range []string{"hooked", "$ rsync", "pushed 2 files to h"} {
+	for _, want := range []string{"hooked", "pushed 2 files to h"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("log lacks %q:\n%s", want, text)
 		}
 	}
-	if l, _ := u.g.View(logView); !strings.Contains(l.Buffer(), "$ ") {
-		t.Errorf("log view = %q", l.Buffer())
+	if strings.Contains(text, "$ ") {
+		t.Errorf("log shows commands:\n%s", text)
 	}
 }
 
@@ -259,13 +258,21 @@ func TestHostListFallsBackToTheFirstHost(t *testing.T) {
 	}
 }
 
-func TestWrapLogKeepsEveryRuneAndColors(t *testing.T) {
-	got := wrapLog([]string{"$ abcdefgh", "error: x", "plain"}, 5)
-	if len(got) != 5 {
-		t.Fatalf("wrapped = %q, want 5 rows", got)
+func TestWrapLogKeepsEveryRuneAndColorsErrors(t *testing.T) {
+	got := wrapLog([]string{"error: abcdefgh", "plain"}, 5)
+	if len(got) != 4 {
+		t.Fatalf("wrapped = %q, want 4 rows", got)
 	}
-	if got[0] != paint(cyan, "$ abc") || got[1] != paint(cyan, "defgh") || got[2] != paint(red, "error") || got[4] != "plain" {
+	if got[0] != paint(red, "error") || got[1] != paint(red, ": abc") || got[2] != paint(red, "defgh") || got[3] != "plain" {
 		t.Errorf("wrapped = %q", got)
+	}
+}
+
+func TestOptionsShowTheRunningTask(t *testing.T) {
+	u := newTestTUI(t, scriptRepo(t, ""))
+	u.m.busy, u.m.task = true, "push"
+	if o := plain(u.options(120)); !strings.Contains(o, "Pushing ") || strings.Contains(o, "Cancel: c") {
+		t.Errorf("options = %q", o)
 	}
 }
 

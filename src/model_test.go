@@ -1,9 +1,14 @@
 package main
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
+
+var escapes = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+func plain(s string) string { return escapes.ReplaceAllString(s, "") }
 
 func testModel() *model {
 	return &model{
@@ -51,7 +56,8 @@ func TestDetailTexts(t *testing.T) {
 	m := testModel()
 	m.focus = jobsPanel
 	title, text := m.detail()
-	for _, want := range []string{"job       12 on a", "slurm/train.sh", "abcdef0123", "note      big", "1 RUNNING"} {
+	text = plain(text)
+	for _, want := range []string{"job       12 on a", "slurm/train.sh", "abcdef0123", "note      big", "● 1 RUNNING"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("job detail lacks %q:\n%s", want, text)
 		}
@@ -61,11 +67,14 @@ func TestDetailTexts(t *testing.T) {
 	}
 	m.sel[jobsPanel] = 1
 	m.logs["11"] = "tail of the log"
-	if _, text = m.detail(); !strings.Contains(text, "retry of  9") || !strings.HasSuffix(text, "tail of the log") {
+	_, text = m.detail()
+	text = plain(text)
+	if !strings.Contains(text, "retry of  9") || !strings.HasSuffix(text, "tail of the log") {
 		t.Errorf("second job detail:\n%s", text)
 	}
 	m.focus = snapsPanel
 	title, text = m.detail()
+	text = plain(text)
 	if !strings.Contains(text, "2.0M") || !strings.Contains(text, "stray     results.csv") || title != "Snapshot aaaaaaaa" {
 		t.Errorf("snapshot detail %q:\n%s", title, text)
 	}
@@ -75,19 +84,23 @@ func TestDetailTexts(t *testing.T) {
 	}
 }
 
-func TestJobLineIsShortAndColored(t *testing.T) {
+func TestJobLineShowsTheOutcomeAtAGlance(t *testing.T) {
 	m := testModel()
 	got := m.jobLine(m.jobs[0])
-	for _, want := range []string{"12", "11-11 10:02", "train.sh", "\x1b[36m1 RUNNING\x1b[0m"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("job line %q lacks %q", got, want)
-		}
+	if plain(got) != "● 12  train  ●1" || !strings.HasPrefix(got, paint(cyan, "●")) {
+		t.Errorf("running job line = %q", got)
 	}
-	if strings.Contains(got, "slurm/") {
-		t.Errorf("job line %q keeps the directory", got)
+	m.states["11"] = jobState{States: map[string]int{"COMPLETED": 34, "FAILED": 2}, Final: true}
+	got = m.jobLine(m.jobs[1])
+	if plain(got) != "✗ 11  eval  ✗2 ✓34" || !strings.HasPrefix(got, paint(red, "✗")) {
+		t.Errorf("failed job line = %q", got)
 	}
-	if stateColor("FAILED") != red || stateColor("COMPLETED") != green || stateColor("PENDING") != yellow {
-		t.Error("state colors")
+	m.states["11"] = jobState{States: map[string]int{"COMPLETED": 3}, Final: true}
+	if got = m.jobLine(m.jobs[1]); !strings.HasPrefix(got, paint(green, "✓")) {
+		t.Errorf("completed job line = %q", got)
+	}
+	if got = (&model{}).jobLine(Job{Job: "5", Script: "a.sh"}); plain(got) != "· 5  a" {
+		t.Errorf("unknown job line = %q", got)
 	}
 }
 

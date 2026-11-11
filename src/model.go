@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,6 +35,7 @@ type model struct {
 	focus  panel
 	filter string
 	busy   bool
+	task   string
 	logs   map[string]string
 	at     time.Time
 }
@@ -89,53 +91,85 @@ func (m *model) snap() (snapshotInfo, bool) {
 }
 
 const (
-	grey   = "90"
-	red    = "31"
-	green  = "32"
-	yellow = "33"
-	cyan   = "36"
+	grey    = "90"
+	red     = "31"
+	green   = "32"
+	yellow  = "33"
+	blue    = "34"
+	magenta = "35"
+	cyan    = "36"
 )
 
 func paint(code, s string) string {
 	return "\x1b[" + code + "m" + s + "\x1b[0m"
 }
 
-func stateColor(state string) string {
-	switch {
-	case strings.HasPrefix(state, "COMPLETED"):
-		return green
-	case strings.HasPrefix(state, "RUNNING"), strings.HasPrefix(state, "COMPLETING"):
-		return cyan
-	case strings.HasPrefix(state, "PENDING"), strings.HasPrefix(state, "CONFIGURING"), strings.HasPrefix(state, "REQUEUED"):
-		return yellow
-	}
-	return red
+type glyph struct {
+	mark  string
+	color string
+	rank  int
 }
 
-func coloredCounts(states map[string]int) string {
+func stateGlyph(state string) glyph {
+	switch {
+	case strings.HasPrefix(state, "RUNNING"), strings.HasPrefix(state, "COMPLETING"):
+		return glyph{"●", cyan, 0}
+	case strings.HasPrefix(state, "PENDING"), strings.HasPrefix(state, "CONFIGURING"), strings.HasPrefix(state, "REQUEUED"), strings.HasPrefix(state, "SUSPENDED"):
+		return glyph{"◌", yellow, 1}
+	case strings.HasPrefix(state, "CANCELLED"):
+		return glyph{"⊘", magenta, 3}
+	case strings.HasPrefix(state, "COMPLETED"):
+		return glyph{"✓", green, 4}
+	}
+	return glyph{"✗", red, 2}
+}
+
+func sortedStates(states map[string]int) []string {
 	names := make([]string, 0, len(states))
 	for name := range states {
 		names = append(names, name)
 	}
-	slices.Sort(names)
-	parts := make([]string, len(names))
-	for i, name := range names {
-		parts[i] = paint(stateColor(name), fmt.Sprintf("%d %s", states[name], name))
+	slices.SortFunc(names, func(a, b string) int {
+		return stateGlyph(a).rank - stateGlyph(b).rank
+	})
+	return names
+}
+
+func jobMark(states map[string]int) string {
+	names := sortedStates(states)
+	if len(names) == 0 {
+		return paint(grey, "·")
+	}
+	g := stateGlyph(names[0])
+	return paint(g.color, g.mark)
+}
+
+func compactCounts(states map[string]int) string {
+	var parts []string
+	for _, name := range sortedStates(states) {
+		g := stateGlyph(name)
+		parts = append(parts, paint(g.color, g.mark+strconv.Itoa(states[name])))
+	}
+	return strings.Join(parts, " ")
+}
+
+func namedCounts(states map[string]int) string {
+	var parts []string
+	for _, name := range sortedStates(states) {
+		g := stateGlyph(name)
+		parts = append(parts, paint(g.color, fmt.Sprintf("%s %d %s", g.mark, states[name], name)))
 	}
 	return strings.Join(parts, "  ")
 }
 
-func shortTime(t string) string {
-	if len(t) < 16 {
-		return t
-	}
-	return t[5:10] + " " + t[11:16]
+func field(name, value string) string {
+	return paint(blue, fmt.Sprintf("%-9s", name)) + " " + value + "\n"
 }
 
 func (m *model) jobLine(j Job) string {
-	line := j.Job + "  " + paint(grey, shortTime(j.Time)) + "  " + filepath.Base(j.Script)
+	line := jobMark(m.states[j.Job].States) + " " + paint(yellow, j.Job) + "  " + strings.TrimSuffix(filepath.Base(j.Script), ".sh")
 	if st, ok := m.states[j.Job]; ok && len(st.States) > 0 {
-		line += "  " + coloredCounts(st.States)
+		line += "  " + compactCounts(st.States)
 	}
 	return line
 }
@@ -151,7 +185,14 @@ func (m *model) active() int {
 }
 
 func snapLine(s snapshotInfo) string {
-	return fmt.Sprintf("%s  %s  %d/%d  %s", short(s.Commit), human(s.KB), s.Active, s.Total, s.State)
+	color := green
+	switch s.State {
+	case stateActive:
+		color = cyan
+	case stateStray:
+		color = yellow
+	}
+	return fmt.Sprintf("%s  %s  %d/%d  %s", paint(yellow, short(s.Commit)), paint(grey, human(s.KB)), s.Active, s.Total, paint(color, string(s.State)))
 }
 
 func (m *model) hostLines() []string {
@@ -190,26 +231,32 @@ func (m *model) detail() (title, text string) {
 		if m.sel[hostsPanel] >= len(m.hosts) || m.hosts[m.sel[hostsPanel]] != m.host {
 			return "Host", "enter selects this host\n"
 		}
-		fmt.Fprintf(&b, "host      %s\ntarget    %s\n", m.host, m.cfg.Target.path(m.cfg.Target.Dir))
-		fmt.Fprintf(&b, "push      %s\npull      %s\n", strings.Join(m.cfg.Push, " "), strings.Join(m.cfg.Pull, " "))
-		fmt.Fprintf(&b, "scripts   %s\nsrun      %s\n", strings.Join(m.cfg.Scripts, " "), m.cfg.Srun)
+		b.WriteString(field("host", m.host))
+		b.WriteString(field("target", m.cfg.Target.path(m.cfg.Target.Dir)))
+		b.WriteString(field("push", strings.Join(m.cfg.Push, " ")))
+		b.WriteString(field("pull", strings.Join(m.cfg.Pull, " ")))
+		b.WriteString(field("scripts", strings.Join(m.cfg.Scripts, " ")))
+		b.WriteString(field("srun", m.cfg.Srun))
 		return "Host " + m.host, b.String()
 	case jobsPanel:
 		j, ok := m.job()
 		if !ok {
 			return "Job", ""
 		}
-		fmt.Fprintf(&b, "job       %s on %s\ntime      %s\n", j.Job, j.Host, j.Time)
-		fmt.Fprintf(&b, "script    %s %s\ncommit    %s\n", j.Script, strings.Join(j.Args, " "), j.Commit)
+		b.WriteString(field("job", j.Job+" on "+j.Host))
+		b.WriteString(field("time", j.Time))
+		b.WriteString(field("script", j.Script+" "+strings.Join(j.Args, " ")))
+		b.WriteString(field("commit", j.Commit))
 		for _, f := range []struct{ name, value string }{
 			{"sbatch", j.Sbatch}, {"note", j.Note}, {"array", j.Array}, {"retry of", j.RetryOf},
 		} {
 			if f.value != "" {
-				fmt.Fprintf(&b, "%-9s %s\n", f.name, f.value)
+				b.WriteString(field(f.name, f.value))
 			}
 		}
 		if st, ok := m.states[j.Job]; ok {
-			fmt.Fprintf(&b, "states    %s\nfinal     %t\n", countsText(st.States), st.Final)
+			b.WriteString(field("states", namedCounts(st.States)))
+			b.WriteString(field("final", strconv.FormatBool(st.Final)))
 		}
 		if text, ok := m.logs[j.Job]; ok {
 			b.WriteString("\n" + text)
@@ -220,10 +267,12 @@ func (m *model) detail() (title, text string) {
 	if !ok {
 		return "Snapshot", ""
 	}
-	fmt.Fprintf(&b, "commit    %s\nsize      %s\njobs      %d active of %d\nstate     %s\n",
-		s.Commit, human(s.KB), s.Active, s.Total, s.State)
+	b.WriteString(field("commit", s.Commit))
+	b.WriteString(field("size", human(s.KB)))
+	b.WriteString(field("jobs", fmt.Sprintf("%d active of %d", s.Active, s.Total)))
+	b.WriteString(field("state", string(s.State)))
 	for _, f := range s.Stray {
-		fmt.Fprintf(&b, "stray     %s\n", f)
+		b.WriteString(field("stray", f))
 	}
 	return "Snapshot " + short(s.Commit), b.String()
 }

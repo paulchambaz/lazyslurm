@@ -21,7 +21,14 @@ const (
 	refreshEvery = 120 * time.Second
 	logKept      = 500
 	logTail      = 200
+	spinEvery    = 100 * time.Millisecond
+	spinFrames   = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 )
+
+var taskNames = map[string]string{
+	"push": "Pushing", "pull": "Pulling", "submit": "Submitting", "retry": "Retrying",
+	"cancel": "Cancelling", "drop": "Dropping", "logs": "Reading logs", "refresh": "Refreshing",
+}
 
 var panelViews = [panelCount]string{"hosts", "jobs", "snaps"}
 
@@ -145,8 +152,8 @@ func runTUI(root, hostFlag string) error {
 	defer g.Close()
 	u := newTUI(g, root, hosts, host, cfg)
 	u.auto = true
-	hookOut, trace = u.log, u.trace
-	defer func() { hookOut, trace = os.Stderr, nil }()
+	hookOut = u.log
+	defer func() { hookOut = os.Stderr }()
 	g.SetManagerFunc(u.layout)
 	if err := u.bind(); err != nil {
 		return err
@@ -156,11 +163,6 @@ func runTUI(root, hostFlag string) error {
 		return err
 	}
 	return nil
-}
-
-func (u *tui) trace(line string) {
-	line = strings.ReplaceAll(strings.Join(strings.Fields(line), " "), `'\''`, `'`)
-	u.log.add("$ " + strings.Replace(line, "ssh -o BatchMode=yes ", "ssh ", 1))
 }
 
 func (u *tui) idle() bool {
@@ -178,7 +180,10 @@ func (u *tui) start(label string, work func() error, apply func()) {
 		}
 		return
 	}
-	u.m.busy = true
+	u.m.busy, u.m.task = true, label
+	if u.auto {
+		u.spin()
+	}
 	root, cfg, prev := u.m.root, u.m.cfg, u.m.fresh
 	u.wg.Add(1)
 	go func() {
@@ -190,6 +195,16 @@ func (u *tui) start(label string, work func() error, apply func()) {
 		f, rerr := refresh(root, cfg, prev)
 		u.post(func() { u.finish(label, err, f, rerr, apply) })
 	}()
+}
+
+func (u *tui) spin() {
+	time.AfterFunc(spinEvery, func() {
+		u.post(func() {
+			if u.m.busy {
+				u.spin()
+			}
+		})
+	})
 }
 
 func (u *tui) finish(label string, err error, f fresh, rerr error, apply func()) {
@@ -421,10 +436,8 @@ func (u *tui) exec() error {
 		if line == "" {
 			return
 		}
-		hookOut, trace = os.Stderr, nil
-		defer func() {
-			hookOut, trace = u.log, u.trace
-		}()
+		hookOut = os.Stderr
+		defer func() { hookOut = u.log }()
 		if err := u.g.Suspend(); err != nil {
 			u.log.add("exec: " + err.Error())
 			return
@@ -567,7 +580,7 @@ func place(g *gocui.Gui, name string, x0, y0, x1, y1 int) (v *gocui.View, create
 func showList(v *gocui.View, lines []string, sel int) {
 	v.Clear()
 	for _, l := range lines {
-		fmt.Fprintln(v, l)
+		fmt.Fprintln(v, " "+l)
 	}
 	v.Highlight = len(lines) > 0
 	v.SelBgColor = gocui.ColorBlue
@@ -596,13 +609,14 @@ func (u *tui) options(width int) string {
 		right += " | " + u.m.at.Format("15:04")
 	}
 	if u.m.busy {
-		right = "working... | " + right
+		frames := []rune(spinFrames)
+		left = taskNames[u.m.task] + " " + string(frames[int(time.Now().UnixMilli()/100)%len(frames)])
 	}
-	pad := width - len([]rune(left)) - len([]rune(right)) - 2
+	pad := width - len([]rune(left)) - len([]rune(right)) - 4
 	if pad < 1 {
-		return paint(cyan, left)
+		return " " + paint(blue, left)
 	}
-	return paint(cyan, left) + strings.Repeat(" ", pad) + paint(grey, right)
+	return " " + paint(blue, left) + strings.Repeat(" ", pad) + paint(grey, right)
 }
 
 func wrapLog(lines []string, width int) []string {
@@ -610,8 +624,6 @@ func wrapLog(lines []string, width int) []string {
 	for _, l := range lines {
 		code := ""
 		switch {
-		case strings.HasPrefix(l, "$ "):
-			code = cyan
 		case strings.HasPrefix(l, "error: "):
 			code = red
 		case strings.HasPrefix(l, "busy: "):
@@ -664,7 +676,7 @@ func (u *tui) layout(g *gocui.Gui) error {
 	title, text := m.detail()
 	v.Title = title
 	v.Clear()
-	fmt.Fprint(v, text)
+	fmt.Fprint(v, " "+strings.ReplaceAll(text, "\n", "\n "))
 	v.SetOrigin(0, min(u.scroll, max(0, strings.Count(text, "\n")+1-v.InnerHeight())))
 	v, _, err = place(g, logView, left, mainEnd, w-1, rows-1)
 	if err != nil {
@@ -672,8 +684,8 @@ func (u *tui) layout(g *gocui.Gui) error {
 	}
 	v.Title = "Log"
 	v.Clear()
-	wrapped := wrapLog(u.log.tail(logTail), v.InnerWidth())
-	fmt.Fprint(v, strings.Join(wrapped[max(0, len(wrapped)-v.InnerHeight()):], "\n"))
+	wrapped := wrapLog(u.log.tail(logTail), v.InnerWidth()-1)
+	fmt.Fprint(v, " "+strings.Join(wrapped[max(0, len(wrapped)-v.InnerHeight()):], "\n "))
 	v, _, err = place(g, optionsView, -1, h-2, w, h)
 	if err != nil {
 		return err

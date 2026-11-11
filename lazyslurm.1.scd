@@ -98,9 +98,13 @@ Without a command, the UI opens. See *THE UI*.
 
 Three panels on the left: *1* Hosts, *2* Jobs of the selected host, newest
 first, and *3* Snapshots. The main view shows the selection; the log panel
-shows every command lazyslurm runs and the output of hooks. The UI calls the
-same functions as the commands above, one task at a time, in the background.
-It refreshes every 120 seconds and on *R*.
+shows the results of the tasks, the output of hooks and the errors, and no
+command lines. Each job starts with a mark: a green check when it completed, a
+red cross when a task failed, a cyan dot while it runs, a yellow circle while
+it waits, a magenta slash when it was cancelled. A spinner and the name of the
+task replace the keys at the bottom while one runs. The UI calls the same
+functions as the commands above, one task at a time, in the background. It
+refreshes every 120 seconds and on *R*, with a single command on the cluster.
 
 *1* *2* *3*, *[* *]*, *tab*
 	Go to a panel.

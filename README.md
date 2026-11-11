@@ -36,7 +36,7 @@ lazyslurm drop [--yes] [--json] [-H HOST] COMMIT
 
 Commands that change the cluster (`submit`, `retry`, `cancel`, `drop`) ask `[y/N]` on a terminal. Without one they do nothing and exit 3, unless `--yes` is given.
 
-Without a command the UI opens: hosts, jobs and snapshots on the left, details and a log of every command on the right. Press `?` for the keys and `q` or `ctrl-c` to quit. Everything else is in the [`man`](./lazyslurm.1.scd) page (`man lazyslurm` once installed).
+Without a command the UI opens: hosts, jobs and snapshots on the left, details and a log of results and errors on the right. Press `?` for the keys and `q` or `ctrl-c` to quit. Everything else is in the [`man`](./lazyslurm.1.scd) page (`man lazyslurm` once installed).
 
 ## Building
 
