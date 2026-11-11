@@ -53,8 +53,9 @@ func pullLogs(root string, t Target, dir string) error {
 }
 
 type pullRow struct {
-	Host  string `json:"host"`
-	Paths int    `json:"paths"`
+	Host    string `json:"host"`
+	Paths   int    `json:"paths"`
+	Dropped int    `json:"dropped"`
 }
 
 func runPull(w io.Writer, root, hostFlag string, asJSON bool, args []string) error {
@@ -65,44 +66,67 @@ func runPull(w io.Writer, root, hostFlag string, asJSON bool, args []string) err
 	if err != nil {
 		return err
 	}
-	n, err := pullFrom(os.Stderr, root, cfg)
+	n, dropped, err := pullFrom(os.Stderr, root, cfg)
 	if err != nil {
 		return fmt.Errorf("pull from %s: %w", cfg.Host, err)
 	}
 	if asJSON {
-		return json.NewEncoder(w).Encode(pullRow{cfg.Host, n})
+		return json.NewEncoder(w).Encode(pullRow{cfg.Host, n, dropped})
 	}
-	_, err = fmt.Fprintf(w, "pulled %d paths from %s\n", n, cfg.Host)
+	line := fmt.Sprintf("pulled %d paths from %s", n, cfg.Host)
+	if dropped > 0 {
+		line += fmt.Sprintf(", dropped %d snapshots", dropped)
+	}
+	_, err = fmt.Fprintln(w, line)
 	return err
 }
 
-// pullFrom runs pre_pull, fetches the pull paths and snapshot logs, then runs post_pull.
-func pullFrom(hooks io.Writer, root string, cfg Config) (int, error) {
+// pullFrom judges the snapshots, runs pre_pull, fetches paths and logs, runs post_pull, then drops the final snapshots.
+func pullFrom(hooks io.Writer, root string, cfg Config) (paths, dropped int, err error) {
 	commit, err := headCommit(root)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	isDirty, err := dirty(root, cfg)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	env := hookEnv(commit, isDirty)
 	dir, err := cfg.Target.resolve()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
+	}
+	infos, err := loadSnapshots(root, cfg, dir)
+	if err != nil {
+		return 0, 0, err
 	}
 	if err := targetHook(hooks, "pre_pull", cfg.Target, dir+"/work", cfg.PrePull, env); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	paths, err := existingPaths(cfg, dir)
+	existing, err := existingPaths(cfg, dir)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	if err := pullPaths(root, cfg.Target, dir, paths); err != nil {
-		return 0, err
+	if err := pullPaths(root, cfg.Target, dir, existing); err != nil {
+		return 0, 0, err
 	}
 	if err := pullLogs(root, cfg.Target, dir); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return len(paths), localHook(hooks, "post_pull", root, cfg.PostPull, env)
+	if err := localHook(hooks, "post_pull", root, cfg.PostPull, env); err != nil {
+		return 0, 0, err
+	}
+	var drop []string
+	for _, s := range infos {
+		switch s.State {
+		case stateFinal:
+			drop = append(drop, s.Commit)
+		case stateStray:
+			fmt.Fprintf(hooks, "kept snapshot %s: %d stray files, see snapshots\n", s.Commit[:8], len(s.Stray))
+		}
+	}
+	if err := deleteSnapshots(cfg, dir, drop); err != nil {
+		return 0, 0, err
+	}
+	return len(existing), len(drop), nil
 }

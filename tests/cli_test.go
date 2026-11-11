@@ -69,9 +69,12 @@ func fakeSlurm(t *testing.T) string {
 	t.Helper()
 	bin, state := t.TempDir(), t.TempDir()
 	scripts := map[string]string{
-		"sbatch": "#!/bin/sh\nn=$(cat \"$FAKE_SLURM/next\" 2>/dev/null || echo 100)\necho $((n + 1)) > \"$FAKE_SLURM/next\"\necho \"$n\"\n",
-		"sacct":  "#!/bin/sh\ncat \"$FAKE_SLURM/sacct\" 2>/dev/null\nexit 0\n",
-		"squeue": "#!/bin/sh\nexit 0\n",
+		"sbatch":   "#!/bin/sh\nn=$(cat \"$FAKE_SLURM/next\" 2>/dev/null || echo 100)\necho $((n + 1)) > \"$FAKE_SLURM/next\"\necho \"$n\"\n",
+		"sacct":    "#!/bin/sh\ncat \"$FAKE_SLURM/sacct\" 2>/dev/null\nexit 0\n",
+		"squeue":   "#!/bin/sh\ncat \"$FAKE_SLURM/squeue\" 2>/dev/null\nexit 0\n",
+		"scontrol": "#!/bin/sh\ncat \"$FAKE_SLURM/scontrol\" 2>/dev/null || exit 1\n",
+		"scancel":  "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$FAKE_SLURM/scancel.log\"\n",
+		"srun":     "#!/bin/sh\nwhile [ \"${1#-}\" != \"$1\" ]; do shift; done\nexec \"$@\"\n",
 	}
 	for name, body := range scripts {
 		write(t, filepath.Join(bin, name), body)
@@ -241,7 +244,7 @@ func TestSubmitStatusAndPullEndToEnd(t *testing.T) {
 		t.Errorf("a final job was shown twice: %q", out)
 	}
 
-	if out, stderr, code = lazyslurm(t, dir, "pull"); code != 0 || out != "pulled 0 paths from a\n" {
+	if out, stderr, code = lazyslurm(t, dir, "pull"); code != 0 || out != "pulled 0 paths from a, dropped 1 snapshots\n" {
 		t.Errorf("pull = %q, %q, exit %d", out, stderr, code)
 	}
 	if _, _, code = lazyslurm(t, dir, "--yes", "submit", "nope.sh"); code != 1 {
@@ -249,5 +252,71 @@ func TestSubmitStatusAndPullEndToEnd(t *testing.T) {
 	}
 	if _, _, code = lazyslurm(t, dir, "submit"); code != 2 {
 		t.Errorf("no script: exit %d, want 2", code)
+	}
+}
+
+func TestVerbsEndToEnd(t *testing.T) {
+	fake := fakeSlurm(t)
+	dir, target := pushRepo(t)
+	write(t, filepath.Join(dir, ".slurm.toml"), "[default]\npush = [\"src\"]\nsrun = \"--time=1\"\n[hosts.a]\ntarget = \""+target+"\"\n")
+	write(t, filepath.Join(dir, "src", "run.sh"), "#!/bin/sh\n")
+	commitAll(t, dir)
+	if _, stderr, code := lazyslurm(t, dir, "--yes", "submit", "src/run.sh"); code != 0 {
+		t.Fatalf("submit: exit %d, %q", code, stderr)
+	}
+	commit, _ := os.ReadDir(target)
+	var snap string
+	for _, e := range commit {
+		if len(e.Name()) == 40 {
+			snap = e.Name()
+		}
+	}
+	if snap == "" {
+		t.Fatal("no snapshot after submit")
+	}
+
+	out, _, code := lazyslurm(t, dir, "snapshots")
+	if code != 0 || !strings.Contains(out, snap[:8]) || !strings.HasSuffix(out, "  1/1  active\n") {
+		t.Errorf("snapshots = %q, exit %d", out, code)
+	}
+	if _, stderr, code := lazyslurm(t, dir, "drop", snap[:8]); code != 1 || !strings.Contains(stderr, "active") {
+		t.Errorf("drop of an active snapshot: exit %d, %q", code, stderr)
+	}
+
+	write(t, filepath.Join(fake, "sacct"), "100|FAILED\n")
+	if _, stderr, code := lazyslurm(t, dir, "retry"); code != 3 || !strings.Contains(stderr, "--yes") {
+		t.Errorf("retry without --yes: exit %d, %q", code, stderr)
+	}
+	if out, _, code = lazyslurm(t, dir, "--yes", "retry"); code != 0 || out != "job 101 submitted on a (retry of 100)\n" {
+		t.Errorf("retry = %q, exit %d", out, code)
+	}
+
+	write(t, filepath.Join(fake, "squeue"), "101|/somewhere\n")
+	if _, stderr, code := lazyslurm(t, dir, "cancel", "101"); code != 3 || !strings.Contains(stderr, "--yes") {
+		t.Errorf("cancel without --yes: exit %d, %q", code, stderr)
+	}
+	if out, _, code = lazyslurm(t, dir, "--yes", "cancel", "101"); code != 0 || out != "cancelled 101 on a\n" {
+		t.Errorf("cancel = %q, exit %d", out, code)
+	}
+	if log, _ := os.ReadFile(filepath.Join(fake, "scancel.log")); string(log) != "101\n" {
+		t.Errorf("scancel saw %q", log)
+	}
+
+	write(t, filepath.Join(target, snap, "slurm-100.out"), "hello\n")
+	if out, _, code = lazyslurm(t, dir, "logs", "100"); code != 0 || out != "hello\n" {
+		t.Errorf("logs = %q, exit %d", out, code)
+	}
+
+	write(t, filepath.Join(fake, "sacct"), "100|FAILED\n101|COMPLETED\n")
+	write(t, filepath.Join(fake, "squeue"), "")
+	if out, _, code = lazyslurm(t, dir, "--yes", "drop", snap); code != 0 || out != "dropped "+snap[:8]+" on a\n" {
+		t.Errorf("drop = %q, exit %d", out, code)
+	}
+
+	if out, _, code = lazyslurm(t, dir, "exec", "--", "echo", "hi"); code != 0 || out != "hi\n" {
+		t.Errorf("exec = %q, exit %d", out, code)
+	}
+	if _, _, code = lazyslurm(t, dir, "exec", "--", "exit 7"); code != 7 {
+		t.Errorf("exec exit 7: exit %d", code)
 	}
 }

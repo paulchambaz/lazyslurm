@@ -54,8 +54,8 @@ func runStatus(w io.Writer, root, hostFlag string, all, asJSON bool, args []stri
 		shown = append(shown, j)
 	}
 	var states map[string]jobState
-	if host != "" {
-		states, err = fetchStates(cfg.Target, shown, time.Now())
+	if host != "" && len(shown) > 0 {
+		states, _, err = fetchStates(cfg.Target, shown, time.Now())
 		if err != nil {
 			return fmt.Errorf("states on %s: %w", host, err)
 		}

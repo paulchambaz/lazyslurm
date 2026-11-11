@@ -17,9 +17,17 @@ echo $((n + 1)) > "$d/next"
 { pwd; for a in "$@"; do printf '%s\n' "$a"; done; echo --; } >> "$d/sbatch.log"
 echo "$n$(cat "$d/suffix" 2>/dev/null)"
 `
+	fakeScancel = `#!/bin/sh
+printf '%s\n' "$@" >> "$FAKE_SLURM/scancel.log"
+`
+	fakeSrun = `#!/bin/sh
+{ pwd; for a in "$@"; do printf '%s\n' "$a"; done; echo --; } >> "$FAKE_SLURM/srun.log"
+while [ "${1#-}" != "$1" ]; do shift; done
+exec "$@"
+`
 	fakeQuery = `#!/bin/sh
 d="$FAKE_SLURM"
-if [ -e "$d/fail" ]; then echo boom >&2; exit 1; fi
+if [ -e "$d/fail" ] || [ -e "$d/fail-$(basename "$0")" ]; then echo boom >&2; exit 1; fi
 cat "$d/$(basename "$0")" 2>/dev/null
 exit 0
 `
@@ -28,7 +36,10 @@ exit 0
 func setupFakeSlurm(t *testing.T) string {
 	t.Helper()
 	bin, state := t.TempDir(), t.TempDir()
-	for name, body := range map[string]string{"sbatch": fakeSbatch, "sacct": fakeQuery, "squeue": fakeQuery} {
+	for name, body := range map[string]string{
+		"sbatch": fakeSbatch, "sacct": fakeQuery, "squeue": fakeQuery, "scontrol": fakeQuery,
+		"scancel": fakeScancel, "srun": fakeSrun,
+	} {
 		write(t, filepath.Join(bin, name), body)
 		if err := os.Chmod(filepath.Join(bin, name), 0o755); err != nil {
 			t.Fatal(err)
@@ -90,7 +101,7 @@ func TestFetchStatesAndItsFailure(t *testing.T) {
 		write(t, filepath.Join(fake, "sacct"), "1_1|COMPLETED\n1_2|RUNNING\n2|FAILED\n")
 		write(t, filepath.Join(fake, "squeue"), "1_2|/snap\n")
 		jobs := []Job{{Job: "1", Time: "t"}, {Job: "2", Time: "t"}}
-		got, err := fetchStates(tg, jobs, time.Now())
+		got, _, err := fetchStates(tg, jobs, time.Now())
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -101,7 +112,7 @@ func TestFetchStatesAndItsFailure(t *testing.T) {
 			t.Errorf("%s: job 2 = %+v", name, s)
 		}
 		write(t, filepath.Join(fake, "fail"), "")
-		if _, err := fetchStates(tg, jobs, time.Now()); err == nil || !strings.Contains(err.Error(), "boom") {
+		if _, _, err := fetchStates(tg, jobs, time.Now()); err == nil || !strings.Contains(err.Error(), "boom") {
 			t.Errorf("%s: failing sacct = %v", name, err)
 		}
 	}
@@ -125,6 +136,64 @@ func TestSbatchBuildsTheCommandAndReadsTheId(t *testing.T) {
 			"--time=1", "--array=1-2", "s h.sh", "a b", "it's", "--", ""}, "\n")
 		if string(log) != want {
 			t.Errorf("%s: sbatch saw %q, want %q", name, log, want)
+		}
+	}
+}
+
+func TestParseTasksKeepsTheTaskIds(t *testing.T) {
+	want := []taskRow{{"7_1", "CANCELLED"}, {"7_[4-9]", "PENDING"}}
+	if got := parseTasks("7_1|CANCELLED by 1234\n7_[4-9]|PENDING\nbroken\n8|\n"); !reflect.DeepEqual(got, want) {
+		t.Errorf("parseTasks = %v, want %v", got, want)
+	}
+}
+
+func TestFailedTasks(t *testing.T) {
+	rows := []taskRow{{"7_1", "COMPLETED"}, {"7_10", "FAILED"}, {"7_2", "TIMEOUT"}, {"7_3", "RUNNING"}, {"7_[5-9]", "PENDING"}}
+	if array, failed := failedTasks(rows); array != "2,10" || !failed {
+		t.Errorf("failedTasks = %q, %v", array, failed)
+	}
+	if array, failed := failedTasks([]taskRow{{"8", "FAILED"}}); array != "" || !failed {
+		t.Errorf("plain job = %q, %v", array, failed)
+	}
+	if _, failed := failedTasks([]taskRow{{"8", "COMPLETED"}, {"9", "RUNNING"}}); failed {
+		t.Error("completed and running tasks are not failures")
+	}
+}
+
+func TestQueueQueriesAndTheirParsing(t *testing.T) {
+	for name, tg := range testTargets(t) {
+		fake := setupFakeSlurm(t)
+		write(t, filepath.Join(fake, "sacct"), "7_1|COMPLETED\n7_2|FAILED\n")
+		write(t, filepath.Join(fake, "squeue"), "7_3|/a\n8|/b\n\n")
+		write(t, filepath.Join(fake, "scontrol"), "JobId=7\n   StdErr=/e.txt\n   StdOut=/o.txt\n")
+		rows, err := taskRows(tg, "7")
+		if err != nil || len(rows) != 2 || rows[1] != (taskRow{"7_2", "FAILED"}) {
+			t.Errorf("%s: taskRows = %v, %v", name, rows, err)
+		}
+		ids, err := activeIDs(tg)
+		if err != nil || !reflect.DeepEqual(ids, []string{"7_3", "8"}) {
+			t.Errorf("%s: activeIDs = %v, %v", name, ids, err)
+		}
+		out, errPath, err := jobLogPaths(tg, "7")
+		if err != nil || out != "/o.txt" || errPath != "/e.txt" {
+			t.Errorf("%s: jobLogPaths = %q %q, %v", name, out, errPath, err)
+		}
+		_, dirs, err := fetchStates(tg, nil, time.Now())
+		if err != nil || len(dirs) != 2 {
+			t.Errorf("%s: queue dirs = %v, %v", name, dirs, err)
+		}
+		write(t, filepath.Join(fake, "fail-scontrol"), "")
+		if _, _, err := jobLogPaths(tg, "7"); err == nil {
+			t.Errorf("%s: a failing scontrol must be an error", name)
+		}
+	}
+}
+
+func TestQueuedMatchesTasksAndRanges(t *testing.T) {
+	ids := []string{"7_2", "7_[4-6,9%2]", "8"}
+	for id, want := range map[string]bool{"7_2": true, "7_5": true, "7_9": true, "7_3": false, "7_7": false, "7": true, "8": true, "8_1": false, "9": false} {
+		if got := queued(ids, id); got != want {
+			t.Errorf("queued(%s) = %v, want %v", id, got, want)
 		}
 	}
 }

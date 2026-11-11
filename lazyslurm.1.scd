@@ -50,7 +50,50 @@ Without a command, the UI opens; it only draws a window for now. Press *q* or
 	*keep/* into the repository (nothing is deleted locally, missing paths are
 	skipped), copy the _slurm-\*.out_ and _slurm-\*.err_ files of the snapshots
 	to _.slurm/logs/COMMIT/_, then run *post_pull* locally. The first failing
-	step stops the rest.
+	step stops the rest. The states of the jobs are read first, and at the
+	end the snapshots that are done are deleted: every job of the commit is
+	final, no job in the queue works inside it, and it holds no stray file (a
+	file that is not in the commit, not under a *keep* path, not matched by
+	*exclude* and not a collected log). A snapshot kept for stray files is
+	reported. If *sacct* or *squeue* fails, nothing is deleted.
+
+*retry* [_JOB_]
+	Resubmit the failed tasks of _JOB_, or of the newest job of the host. A
+	task failed when it is in a final state other than _COMPLETED_. For an
+	array, the failed task numbers are given as *--array*, which replaces the
+	script's own *--array* (so a *%limit* is lost). The job runs the same
+	script, arguments, *sbatch* options and commit as before, whatever HEAD is.
+	If the snapshot of that commit is gone, it is rebuilt from the local
+	repository with *git archive*, *tar* and *rsync*, hardlinked to *work/*.
+	*post_push* runs in the snapshot. The journal line has *retry_of* and
+	*array*. Confirmed. The host is the one of the job.
+
+*cancel* _JOB_[_\_TASK_]
+	Run *scancel* on an active job or task, after checking it is in the queue.
+	There is no default job. Confirmed. The host is the one of the job.
+
+*logs* [*-f*] [*--err*] _JOB_[_\_TASK_]
+	Print the standard output of a job, or with *--err* its standard error.
+	It is read from the path *scontrol* reports, else from the snapshot on the
+	target, else from _.slurm/logs/COMMIT/_ after a pull. With *-f* the file
+	is followed until interrupted; the job must have started.
+
+*exec* [*--*] _COMMAND_...
+	Send the files like *push*, then run _COMMAND_ in *work/* through *srun*
+	with the *srun* options of the host, after the *prelude*. One argument is
+	a shell command line, several are quoted one by one. Refused without a
+	*srun* key. The exit status is the command's. Not journaled, not
+	confirmed.
+
+*snapshots*
+	One line per snapshot of the host, oldest first: commit, size, active jobs
+	over total jobs, and state (_active_, _final_ or _stray_). The size is what
+	the snapshot costs beyond *work/* and the older snapshots. Stray files are
+	listed below it.
+
+*drop* _COMMIT_
+	Delete a snapshot, given by a hash prefix. Refused when a job is active in
+	it. Stray files are not a reason to refuse. Confirmed.
 
 # OPTIONS
 
@@ -68,8 +111,15 @@ Without a command, the UI opens; it only draws a window for now. Press *q* or
 	Print JSON Lines.
 
 *--yes*
-	Do not ask for confirmation. Commands that need it exit with status 3 and do
-	nothing without it.
+	Do not ask for confirmation. Without it, a terminal gets a _[y/N]_ prompt
+	(an answer other than _y_ exits 1), and without a terminal the commands
+	that change the cluster do nothing and exit with status 3.
+
+# EXIT STATUS
+
+0 on success, 1 on an error or a declined prompt, 2 on a usage error, 3 when
+a confirmation was needed and not given. *exec* exits with the status of its
+command.
 
 # FILES
 
@@ -84,7 +134,7 @@ _.slurm/seen_
 
 # SEE ALSO
 
-*ssh*(1), *rsync*(1), *sbatch*(1), *sacct*(1)
+*ssh*(1), *rsync*(1), *sbatch*(1), *sacct*(1), *scancel*(1), *srun*(1)
 
 # AUTHORS
 

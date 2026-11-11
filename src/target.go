@@ -21,10 +21,19 @@ func quoteDir(dir string) string {
 }
 
 func (t Target) cmd(script string) (*exec.Cmd, string) {
+	return t.interactive(script, false)
+}
+
+// interactive builds the command for script, with a remote terminal when tty is set.
+func (t Target) interactive(script string, tty bool) (*exec.Cmd, string) {
 	if t.Alias == "" {
 		return command("bash", "-c", script), "bash"
 	}
-	return command("ssh", "-o", "BatchMode=yes", t.Alias, "bash -c "+quote(script)), "ssh " + t.Alias
+	args := []string{"-o", "BatchMode=yes"}
+	if tty {
+		args = append(args, "-t")
+	}
+	return command("ssh", append(args, t.Alias, "bash -c "+quote(script))...), "ssh " + t.Alias
 }
 
 func (t Target) path(p string) string {
@@ -35,13 +44,22 @@ func (t Target) path(p string) string {
 }
 
 func (t Target) run(script string, stdin io.Reader) ([]byte, error) {
-	c, name := t.cmd(script)
-	var out, errOut bytes.Buffer
-	c.Stdin, c.Stdout, c.Stderr = stdin, &out, &errOut
-	if err := c.Run(); err != nil {
-		return nil, fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(errOut.String()))
+	var out bytes.Buffer
+	if err := t.stream(script, stdin, &out); err != nil {
+		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+// stream runs script on the target and writes its standard output to out as it comes.
+func (t Target) stream(script string, stdin io.Reader, out io.Writer) error {
+	c, name := t.cmd(script)
+	var errOut bytes.Buffer
+	c.Stdin, c.Stdout, c.Stderr = stdin, out, &errOut
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(errOut.String()))
+	}
+	return nil
 }
 
 // resolve creates the target directory if needed and returns its absolute path.

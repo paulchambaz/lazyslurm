@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/jesseduffield/gocui"
@@ -16,14 +17,26 @@ import (
 //go:embed VERSION
 var version string
 
+var commands = []string{
+	"cancel", "drop", "exec", "logs", "pull", "push", "retry", "snapshots", "status", "submit",
+}
+
 const usage = `usage: lazyslurm [-hV] [-H HOST] [--json] [--yes] [COMMAND [ARGS]]
 
 A terminal UI for Slurm clusters, opened from a repo. Without a command it
 opens the UI.
 
 commands:
-  pull                  fetch the pull paths and the snapshot logs
+  cancel JOB[_TASK]     cancel an active job
+  drop COMMIT           delete a snapshot, by hash prefix
+  exec [--] COMMAND...  run COMMAND in work/ on a short allocation
+  logs [-f] [--err] JOB[_TASK]
+                        print the stdout of a job, or its stderr
+  pull                  fetch the pull paths and the snapshot logs, then
+                        delete the snapshots that are done
   push                  send the push set to work/ on the target
+  retry [JOB]           resubmit the failed tasks of a job
+  snapshots             list the snapshots, their size and their state
   status [--all] [JOB]  list the jobs of the journal with their states
   submit [--sbatch OPTS] [--note TEXT] SCRIPT [ARGS...]
                         snapshot HEAD and submit SCRIPT with sbatch
@@ -33,7 +46,8 @@ options:
   -V        print the version and exit
   -H HOST   use this host of .slurm.toml, instead of CLUSTER or the default
   --json    print JSON Lines
-  --yes     do not ask for confirmation (without it, submit exits 3)
+  --yes     do not ask for confirmation (without a terminal, the commands
+            that change the cluster exit 3 instead)
 `
 
 type usageError string
@@ -44,6 +58,9 @@ func main() {
 	err := run(os.Args[1:])
 	if err == nil {
 		return
+	}
+	if code, ok := errors.AsType[exitError](err); ok {
+		os.Exit(int(code))
 	}
 	fmt.Fprintln(os.Stderr, "lazyslurm:", err)
 	if _, ok := errors.AsType[usageError](err); ok {
@@ -66,6 +83,8 @@ func run(args []string) error {
 	sbatchFlag := fs.String("sbatch", "", "")
 	note := fs.String("note", "", "")
 	all := fs.Bool("all", false, "")
+	follow := fs.Bool("f", false, "")
+	stderr := fs.Bool("err", false, "")
 	if err := fs.Parse(args); err != nil {
 		return usageError(err.Error())
 	}
@@ -85,35 +104,38 @@ func run(args []string) error {
 		fmt.Println("lazyslurm", strings.TrimSpace(version))
 		return nil
 	}
-	switch command {
-	case "":
+	if command == "" {
 		return ui()
-	case "status":
-		root, err := repoRoot()
-		if err != nil {
-			return err
-		}
-		return runStatus(os.Stdout, root, *hostFlag, *all, *asJSON, rest)
-	case "push":
-		root, err := repoRoot()
-		if err != nil {
-			return err
-		}
-		return runPush(os.Stdout, root, *hostFlag, *asJSON, rest)
-	case "pull":
-		root, err := repoRoot()
-		if err != nil {
-			return err
-		}
-		return runPull(os.Stdout, root, *hostFlag, *asJSON, rest)
-	case "submit":
-		root, err := repoRoot()
-		if err != nil {
-			return err
-		}
-		return runSubmit(os.Stdout, root, *hostFlag, *yes, *asJSON, *sbatchFlag, *note, rest)
 	}
-	return usageError(fmt.Sprintf("unknown command %q", command))
+	if !slices.Contains(commands, command) {
+		return usageError(fmt.Sprintf("unknown command %q", command))
+	}
+	root, err := repoRoot()
+	if err != nil {
+		return err
+	}
+	ask := confirmer{Yes: *yes, Tty: isTerminal(os.Stdin), In: os.Stdin, Out: os.Stderr}
+	switch command {
+	case "cancel":
+		return runCancel(os.Stdout, root, *hostFlag, ask, *asJSON, rest)
+	case "drop":
+		return runDrop(os.Stdout, root, *hostFlag, ask, *asJSON, rest)
+	case "exec":
+		return runExec(os.Stdout, root, *hostFlag, rest)
+	case "logs":
+		return runLogs(os.Stdout, root, *hostFlag, *follow, *stderr, rest)
+	case "pull":
+		return runPull(os.Stdout, root, *hostFlag, *asJSON, rest)
+	case "push":
+		return runPush(os.Stdout, root, *hostFlag, *asJSON, rest)
+	case "retry":
+		return runRetry(os.Stdout, root, *hostFlag, ask, *asJSON, rest)
+	case "snapshots":
+		return runSnapshots(os.Stdout, root, *hostFlag, *asJSON, rest)
+	case "status":
+		return runStatus(os.Stdout, root, *hostFlag, *all, *asJSON, rest)
+	}
+	return runSubmit(os.Stdout, root, *hostFlag, ask, *asJSON, *sbatchFlag, *note, rest)
 }
 
 func ui() error {

@@ -10,17 +10,6 @@ import (
 	"time"
 )
 
-type confirmError string
-
-func (e confirmError) Error() string { return string(e) }
-
-func confirm(yes bool, what string) error {
-	if yes {
-		return nil
-	}
-	return confirmError(what + ": nothing done, pass --yes to confirm")
-}
-
 func checkScript(root string, cfg Config, script string) error {
 	if badPath(script) || !insideAny(script, cfg.Push) {
 		return fmt.Errorf("%s is not inside the push paths", script)
@@ -41,12 +30,27 @@ func checkScript(root string, cfg Config, script string) error {
 }
 
 type submitRow struct {
-	Host   string `json:"host"`
-	Job    string `json:"job"`
-	Commit string `json:"commit"`
+	Host    string `json:"host"`
+	Job     string `json:"job"`
+	Commit  string `json:"commit"`
+	RetryOf string `json:"retry_of,omitempty"`
+	Array   string `json:"array,omitempty"`
 }
 
-func runSubmit(w io.Writer, root, hostFlag string, yes, asJSON bool, extra, note string, args []string) error {
+// launch runs sbatch for j in snap with extra options and journals the new job.
+func launch(root string, cfg Config, snap string, j Job, extra string) (string, error) {
+	job, err := sbatch(cfg, snap, j.Commit, j.Script, j.Args, extra)
+	if err != nil {
+		return "", err
+	}
+	j.Time, j.Host, j.Job = time.Now().Format(time.RFC3339), cfg.Host, job
+	if err := appendJob(root, j); err != nil {
+		return "", fmt.Errorf("job %s submitted on %s but not journaled: %w", job, cfg.Host, err)
+	}
+	return job, nil
+}
+
+func runSubmit(w io.Writer, root, hostFlag string, ask confirmer, asJSON bool, extra, note string, args []string) error {
 	if len(args) == 0 {
 		return usageError("submit needs a script")
 	}
@@ -58,26 +62,21 @@ func runSubmit(w io.Writer, root, hostFlag string, yes, asJSON bool, extra, note
 	if err := checkScript(root, cfg, script); err != nil {
 		return err
 	}
-	if err := confirm(yes, fmt.Sprintf("would submit %s on %s", script, cfg.Host)); err != nil {
+	if err := ask.ask(fmt.Sprintf("would submit %s on %s", script, cfg.Host)); err != nil {
 		return err
 	}
 	s, err := syncUp(os.Stderr, root, cfg, true)
 	if err != nil {
 		return fmt.Errorf("submit to %s: %w", cfg.Host, err)
 	}
-	job, err := sbatch(cfg, s.Dir+"/"+s.Commit, s.Commit, script, args[1:], extra)
+	job, err := launch(root, cfg, s.Dir+"/"+s.Commit, Job{
+		Script: script, Commit: s.Commit, Args: args[1:], Sbatch: extra, Note: note,
+	}, extra)
 	if err != nil {
 		return fmt.Errorf("submit to %s: %w", cfg.Host, err)
 	}
-	err = appendJob(root, Job{
-		Time: time.Now().Format(time.RFC3339), Host: cfg.Host, Job: job, Script: script,
-		Commit: s.Commit, Args: args[1:], Sbatch: extra, Note: note,
-	})
-	if err != nil {
-		return fmt.Errorf("job %s submitted on %s but not journaled: %w", job, cfg.Host, err)
-	}
 	if asJSON {
-		return json.NewEncoder(w).Encode(submitRow{cfg.Host, job, s.Commit})
+		return json.NewEncoder(w).Encode(submitRow{Host: cfg.Host, Job: job, Commit: s.Commit})
 	}
 	_, err = fmt.Fprintf(w, "job %s submitted on %s\n", job, cfg.Host)
 	return err

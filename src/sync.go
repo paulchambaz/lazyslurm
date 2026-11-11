@@ -73,8 +73,8 @@ func nulJoin(names []string) *bytes.Buffer {
 	return &b
 }
 
-func prepareScript(cfg Config, dir string) string {
-	work, keep := dir+"/work", dir+"/keep"
+func prepareScript(cfg Config, dir, tree string) string {
+	work, keep := dir+"/"+tree, dir+"/keep"
 	var b strings.Builder
 	fmt.Fprintf(&b, "set -e\nmkdir -p %s\n", quote(work))
 	for _, k := range cfg.Keep {
@@ -158,7 +158,7 @@ func push(root string, cfg Config, dir string) (sent, removed int, err error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	if _, err := cfg.Target.run(prepareScript(cfg, dir), nil); err != nil {
+	if _, err := cfg.Target.run(prepareScript(cfg, dir, "work"), nil); err != nil {
 		return 0, 0, fmt.Errorf("prepare work/: %w", err)
 	}
 	if err := send(root, cfg.Target, dir, files); err != nil {
@@ -187,6 +187,7 @@ type synced struct {
 	Commit  string
 	Sent    int
 	Removed int
+	Dirty   bool
 }
 
 // syncUp runs pre_push, sends the push set, snapshots HEAD when asked, then runs post_push.
@@ -211,7 +212,7 @@ func syncUp(w io.Writer, root string, cfg Config, snap bool) (synced, error) {
 	if err != nil {
 		return synced{}, err
 	}
-	s := synced{Dir: dir, Commit: commit}
+	s := synced{Dir: dir, Commit: commit, Dirty: isDirty}
 	s.Sent, s.Removed, err = push(root, cfg, dir)
 	if err == nil && snap {
 		err = snapshot(cfg.Target, dir, commit)

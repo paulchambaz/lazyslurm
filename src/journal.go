@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -31,6 +32,24 @@ type seenSet map[string]bool
 
 func (s seenSet) has(j Job) bool {
 	return s[j.Host+" "+j.Job] || s[j.Job]
+}
+
+// findJob returns the newest journal line of a job, on host when given.
+func findJob(jobs []Job, host, id string) (Job, bool, error) {
+	var found Job
+	ok := false
+	for _, j := range slices.Backward(jobs) {
+		if j.Job != baseJob(id) || host != "" && j.Host != host {
+			continue
+		}
+		if ok && j.Host != found.Host {
+			return Job{}, false, fmt.Errorf("job %s exists on %s and %s: pass -H", id, found.Host, j.Host)
+		}
+		if !ok {
+			found, ok = j, true
+		}
+	}
+	return found, ok, nil
 }
 
 func journalPath(root string) string {

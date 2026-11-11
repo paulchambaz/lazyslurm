@@ -16,6 +16,7 @@ func pull(root string) (string, error) {
 
 func TestPullFetchesPathsAndLogsInOrder(t *testing.T) {
 	for name, tg := range testTargets(t) {
+		setupFakeSlurm(t)
 		root := jobRepo(t, tg, "pre_pull = 'echo ran > pre_ran'\npost_pull = 'cp outputs/logs/sub/a.txt saw.txt'\n")
 		dir, err := tg.resolve()
 		if err != nil {
@@ -59,6 +60,7 @@ func TestPullFetchesPathsAndLogsInOrder(t *testing.T) {
 
 func TestFailingPrePullPullsNothing(t *testing.T) {
 	for name, tg := range testTargets(t) {
+		setupFakeSlurm(t)
 		root := jobRepo(t, tg, "pre_pull = 'exit 3'\npost_pull = 'touch post_ran'\n")
 		dir, err := tg.resolve()
 		if err != nil {
@@ -81,5 +83,50 @@ func TestPullTakesNoArguments(t *testing.T) {
 	root := jobRepo(t, testTargets(t)["local"], "")
 	if err := runPull(&bytes.Buffer{}, root, "", false, []string{"x"}); err == nil {
 		t.Error("pull x must fail")
+	}
+}
+
+func TestPullDropsOnlyTheSnapshotsThatAreDone(t *testing.T) {
+	for name, tg := range testTargets(t) {
+		root, fake, dir, commits := submitTwice(t, tg, "")
+		write(t, filepath.Join(fake, "sacct"), "100|COMPLETED\n101|RUNNING\n")
+		out, err := pull(root)
+		if err != nil || out != "pulled 0 paths from h, dropped 1 snapshots\n" {
+			t.Fatalf("%s: pull = %q, %v", name, out, err)
+		}
+		if exists(filepath.Join(dir, commits[0])) || !exists(filepath.Join(dir, commits[1])) {
+			t.Errorf("%s: the finished snapshot must go and the running one stay", name)
+		}
+		write(t, filepath.Join(fake, "sacct"), "101|COMPLETED\n")
+		write(t, filepath.Join(dir, commits[1], "results.csv"), "r\n")
+		out, err = pull(root)
+		if err != nil || out != "pulled 0 paths from h\n" || !exists(filepath.Join(dir, commits[1])) {
+			t.Errorf("%s: a snapshot with stray files must stay: %q, %v", name, out, err)
+		}
+	}
+}
+
+func TestPullDeletesNothingWhenSomethingFails(t *testing.T) {
+	for name, tg := range testTargets(t) {
+		root, fake, dir, commits := submitTwice(t, tg, "post_pull = 'exit 1'\n")
+		write(t, filepath.Join(fake, "sacct"), "100|COMPLETED\n101|COMPLETED\n")
+		if _, err := pull(root); err == nil || !strings.Contains(err.Error(), "post_pull") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+		write(t, filepath.Join(fake, "fail-sacct"), "")
+		if err := os.RemoveAll(filepath.Join(root, ".slurm", "logs")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pull(root); err == nil || !strings.Contains(err.Error(), "sacct") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+		if exists(filepath.Join(root, ".slurm", "logs")) {
+			t.Errorf("%s: a failed state fetch must stop the pull before any rsync", name)
+		}
+		for _, c := range commits {
+			if !exists(filepath.Join(dir, c)) {
+				t.Errorf("%s: snapshot %s was deleted after a failure", name, c[:8])
+			}
+		}
 	}
 }

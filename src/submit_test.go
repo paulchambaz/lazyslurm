@@ -38,7 +38,7 @@ func jobRepo(t *testing.T, tg Target, extra string) string {
 
 func submit(root string, args ...string) (string, error) {
 	var out bytes.Buffer
-	err := runSubmit(&out, root, "", true, false, "--time=1", "a note", args)
+	err := runSubmit(&out, root, "", confirmer{Yes: true}, false, "--time=1", "a note", args)
 	return out.String(), err
 }
 
@@ -164,14 +164,14 @@ func TestSubmitNeedsConfirmation(t *testing.T) {
 	tg := testTargets(t)["local"]
 	fake := setupFakeSlurm(t)
 	root := jobRepo(t, tg, "")
-	err := runSubmit(&bytes.Buffer{}, root, "", false, false, "", "", []string{"slurm/run.sh"})
+	err := runSubmit(&bytes.Buffer{}, root, "", confirmer{}, false, "", "", []string{"slurm/run.sh"})
 	if _, ok := errors.AsType[confirmError](err); !ok {
 		t.Fatalf("err = %v", err)
 	}
 	if exists(filepath.Join(fake, "sbatch.log")) || exists(journalPath(root)) || exists(tg.Dir) && exists(filepath.Join(tg.Dir, "work")) {
 		t.Error("an unconfirmed submit changed something")
 	}
-	err = runSubmit(&bytes.Buffer{}, root, "", true, false, "", "", nil)
+	err = runSubmit(&bytes.Buffer{}, root, "", confirmer{Yes: true}, false, "", "", nil)
 	if _, ok := errors.AsType[usageError](err); !ok {
 		t.Errorf("no script: err = %v", err)
 	}
