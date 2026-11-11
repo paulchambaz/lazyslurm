@@ -78,7 +78,7 @@ func TestDetailTexts(t *testing.T) {
 		t.Errorf("snapshot detail %q:\n%s", title, text)
 	}
 	m.focus = hostsPanel
-	if got := m.hostLines(); got[0] != "* a" || got[1] != "  b" {
+	if got := m.hostLines(); plain(got[0]) != "* a" || got[1] != "  b" || !strings.Contains(got[0], paint(green, "*")) {
 		t.Errorf("host lines = %q", got)
 	}
 }

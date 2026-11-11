@@ -590,3 +590,39 @@ func TestOptionsBarEndsWithTheVersion(t *testing.T) {
 		t.Errorf("version kept in a bar that is too narrow: %q", o)
 	}
 }
+
+func TestOnlyTheFocusedPanelShowsItsCursor(t *testing.T) {
+	u := newTestTUI(t, scriptRepo(t, ""))
+	if err := u.focusOn(hostsPanel); err != nil {
+		t.Fatal(err)
+	}
+	u.settle(t)
+	highlighted := func() []bool {
+		var got []bool
+		for _, name := range panelViews {
+			v, err := u.g.View(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, v.Highlight)
+		}
+		return got
+	}
+	if got := highlighted(); !got[u.m.focus] {
+		t.Errorf("focused panel has no cursor: %v", got)
+	}
+	for i, on := range highlighted() {
+		if on && panel(i) != u.m.focus {
+			t.Errorf("panel %d shows a cursor without the focus", i)
+		}
+	}
+	if err := u.focusMain(); err != nil {
+		t.Fatal(err)
+	}
+	u.settle(t)
+	for i, on := range highlighted() {
+		if on {
+			t.Errorf("panel %d shows a cursor while the main view has the focus", i)
+		}
+	}
+}

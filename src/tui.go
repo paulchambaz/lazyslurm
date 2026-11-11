@@ -920,6 +920,7 @@ func (u *tui) layout(g *gocui.Gui) error {
 			lines = m.snapLines()
 		}
 		showList(v, lines, m.sel[p])
+		v.Highlight = v.Highlight && p == m.focus && !u.inMain && !u.inLog
 	}
 	v, _, err := place(g, mainView, left, 0, w-1, mainEnd-1)
 	if err != nil {

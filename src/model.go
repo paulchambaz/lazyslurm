@@ -229,7 +229,7 @@ func (m *model) hostLines() []string {
 	for i, h := range m.hosts {
 		lines[i] = "  " + h
 		if h == m.host {
-			lines[i] = "* " + h
+			lines[i] = paint(green, "*") + " " + h
 		}
 	}
 	return lines
