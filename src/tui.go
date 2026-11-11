@@ -188,7 +188,7 @@ func runTUI(root, hostFlag string) error {
 		u.log.add("error: " + err.Error())
 	}
 	hookOut = u.log
-	defer func() { hookOut = os.Stderr }()
+	defer func() { hookOut, hookColumns = os.Stderr, 0 }()
 	if err := u.listenForPasswords(); err != nil {
 		u.log.add("error: " + err.Error())
 	}
@@ -220,6 +220,9 @@ func (u *tui) start(label string, work func() error, apply func()) {
 		return
 	}
 	u.m.busy, u.m.task = true, label
+	if v, err := u.g.View(logView); err == nil {
+		hookColumns = v.InnerWidth() - 1
+	}
 	if u.auto {
 		u.spin()
 	}

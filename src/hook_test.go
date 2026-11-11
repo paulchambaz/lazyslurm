@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -63,5 +64,20 @@ func TestFailingHookReportsItsStatus(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "pre_pull") || !strings.Contains(out.String(), "worse") {
 			t.Errorf("%s: err = %v, output = %q", name, err, out.String())
 		}
+	}
+}
+
+func TestHooksSeeTheWidthOfTheLogPanelOnlyWhenTheUIRunsThem(t *testing.T) {
+	t.Cleanup(func() { hookColumns = 0 })
+	hasColumns := func() bool {
+		return slices.ContainsFunc(hookEnv("abc", false, "h"), func(e string) bool { return strings.HasPrefix(e, "COLUMNS=") })
+	}
+	if hasColumns() {
+		t.Error("COLUMNS is set outside the UI")
+	}
+	hookColumns = 57
+	var out bytes.Buffer
+	if err := localHook(&out, "post_pull", t.TempDir(), `echo "$COLUMNS"`, hookEnv("abc", false, "h")); err != nil || out.String() != "57\n" {
+		t.Errorf("COLUMNS = %q, %v", out.String(), err)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -14,8 +15,16 @@ func dirtyFlag(dirty bool) string {
 	return "0"
 }
 
+// hookColumns is the width of the log panel while the UI runs a task, 0 otherwise.
+// Hooks have no terminal there, so COLUMNS tells them how wide their output may be.
+var hookColumns int
+
 func hookEnv(commit string, dirty bool, host string) []string {
-	return []string{"GIT_COMMIT=" + commit, "GIT_DIRTY=" + dirtyFlag(dirty), "CLUSTER=" + host}
+	env := []string{"GIT_COMMIT=" + commit, "GIT_DIRTY=" + dirtyFlag(dirty), "CLUSTER=" + host}
+	if hookColumns > 0 {
+		env = append(env, "COLUMNS="+strconv.Itoa(hookColumns))
+	}
+	return env
 }
 
 func runHook(w io.Writer, name string, c *exec.Cmd) error {

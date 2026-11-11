@@ -29,7 +29,7 @@ func newTestTUI(t *testing.T, root string) *tui {
 	u := newTUI(g, root, hosts, host, cfg)
 	u.post = func(f func()) { f() }
 	u.log.wake = nil
-	t.Cleanup(func() { hookOut = os.Stderr })
+	t.Cleanup(func() { hookOut, hookColumns = os.Stderr, 0 })
 	hookOut = u.log
 	return u
 }
@@ -726,5 +726,18 @@ func TestSnapshotsShrinkWhenTheFocusLeavesThem(t *testing.T) {
 	u.back()
 	if got := height(); got != large {
 		t.Errorf("back on snapshots: %d rows, want %d", got, large)
+	}
+}
+
+func TestATaskTellsHooksTheWidthOfTheLog(t *testing.T) {
+	setupFakeSlurm(t)
+	u := newTestTUI(t, scriptRepo(t, ""))
+	t.Cleanup(func() { hookColumns = 0 })
+	u.settle(t)
+	u.start("task", func() error { return nil }, nil)
+	u.settle(t)
+	log, _ := u.g.View(logView)
+	if hookColumns != log.InnerWidth()-1 || hookColumns < 20 {
+		t.Errorf("hookColumns = %d, log inner width %d", hookColumns, log.InnerWidth())
 	}
 }

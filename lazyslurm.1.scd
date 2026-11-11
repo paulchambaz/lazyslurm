@@ -195,6 +195,9 @@ cancels and makes *ssh* fail). It sets *SSH_ASKPASS* and
 prompt: they run *ssh* with *BatchMode=yes*, so open a master connection
 first if the cluster needs a password.
 
+Hooks run by the UI have no terminal: their output goes to the log panel, and
+*COLUMNS* holds its width.
+
 The mouse works too: a click focuses a panel and selects a line, a double
 click does what *enter* does, and the wheel moves the selection of a list or
 scrolls the main view. A click on the log panel focuses it, and *j* *k* or the
