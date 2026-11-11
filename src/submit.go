@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"time"
 )
@@ -65,7 +64,7 @@ func runSubmit(w io.Writer, root, hostFlag string, ask confirmer, asJSON bool, e
 	if err := ask.ask(fmt.Sprintf("would submit %s on %s", script, cfg.Host)); err != nil {
 		return err
 	}
-	s, err := syncUp(os.Stderr, root, cfg, true)
+	s, err := syncUp(hookOut, root, cfg, true)
 	if err != nil {
 		return fmt.Errorf("submit to %s: %w", cfg.Host, err)
 	}

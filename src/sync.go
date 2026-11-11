@@ -247,7 +247,7 @@ func runPush(w io.Writer, root, hostFlag string, asJSON bool, args []string) err
 	if err != nil {
 		return err
 	}
-	s, err := syncUp(os.Stderr, root, cfg, false)
+	s, err := syncUp(hookOut, root, cfg, false)
 	if err != nil {
 		return fmt.Errorf("push to %s: %w", cfg.Host, err)
 	}

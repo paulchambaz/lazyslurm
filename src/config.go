@@ -62,26 +62,34 @@ type file struct {
 	Hosts   map[string]table `toml:"hosts"`
 }
 
-func loadConfig(root, hostFlag string) (Config, error) {
+func parseConfig(root string) (file, error) {
 	data, err := os.ReadFile(filepath.Join(root, configFile))
 	if err != nil {
-		return Config{}, fmt.Errorf("read %s: %w", configFile, err)
+		return file{}, fmt.Errorf("read %s: %w", configFile, err)
 	}
 	var f file
 	md, err := toml.Decode(string(data), &f)
 	if err != nil {
-		return Config{}, fmt.Errorf("%s: %w", configFile, err)
+		return file{}, fmt.Errorf("%s: %w", configFile, err)
 	}
 	if keys := md.Undecoded(); len(keys) > 0 {
-		return Config{}, fmt.Errorf("%s: unknown key %s", configFile, keys[0])
+		return file{}, fmt.Errorf("%s: unknown key %s", configFile, keys[0])
 	}
 	if f.Default.Target != nil {
-		return Config{}, errors.New("target: only allowed in a [hosts.NAME] table")
+		return file{}, errors.New("target: only allowed in a [hosts.NAME] table")
 	}
 	for name, t := range f.Hosts {
 		if t.Host != nil {
-			return Config{}, fmt.Errorf("hosts.%s.host: only allowed in [default]", name)
+			return file{}, fmt.Errorf("hosts.%s.host: only allowed in [default]", name)
 		}
+	}
+	return f, nil
+}
+
+func loadConfig(root, hostFlag string) (Config, error) {
+	f, err := parseConfig(root)
+	if err != nil {
+		return Config{}, err
 	}
 	name, err := selectHost(f, hostFlag)
 	if err != nil {
@@ -92,6 +100,20 @@ func loadConfig(root, hostFlag string) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, validate(&cfg)
+}
+
+// hostList returns the hosts of .slurm.toml and the selected one, the first when none is.
+func hostList(root, hostFlag string) ([]string, string, error) {
+	f, err := parseConfig(root)
+	if err != nil {
+		return nil, "", err
+	}
+	names := hostNames(f)
+	name, err := selectHost(f, hostFlag)
+	if errors.Is(err, errNoHost) && len(names) > 0 {
+		name, err = names[0], nil
+	}
+	return names, name, err
 }
 
 func hostNames(f file) []string {

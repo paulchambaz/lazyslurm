@@ -10,8 +10,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-
-	"github.com/jesseduffield/gocui"
 )
 
 //go:embed VERSION
@@ -104,15 +102,15 @@ func run(args []string) error {
 		fmt.Println("lazyslurm", strings.TrimSpace(version))
 		return nil
 	}
-	if command == "" {
-		return ui()
-	}
-	if !slices.Contains(commands, command) {
+	if command != "" && !slices.Contains(commands, command) {
 		return usageError(fmt.Sprintf("unknown command %q", command))
 	}
 	root, err := repoRoot()
 	if err != nil {
 		return err
+	}
+	if command == "" {
+		return runTUI(root, *hostFlag)
 	}
 	ask := confirmer{Yes: *yes, Tty: isTerminal(os.Stdin), In: os.Stdin, Out: os.Stderr}
 	switch command {
@@ -136,20 +134,4 @@ func run(args []string) error {
 		return runStatus(os.Stdout, root, *hostFlag, *all, *asJSON, rest)
 	}
 	return runSubmit(os.Stdout, root, *hostFlag, ask, *asJSON, *sbatchFlag, *note, rest)
-}
-
-func ui() error {
-	g, err := gocui.NewGui(gocui.NewGuiOpts{OutputMode: gocui.OutputTrue})
-	if err != nil {
-		return err
-	}
-	defer g.Close()
-	g.SetManagerFunc(layout)
-	if err := bind(g); err != nil {
-		return err
-	}
-	if err := g.MainLoop(); err != nil && !errors.Is(err, gocui.ErrQuit) {
-		return err
-	}
-	return nil
 }

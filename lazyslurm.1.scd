@@ -17,8 +17,7 @@ submit, follow, pull the results, retry and cancel.
 The local repository is the source of truth. Nothing is installed on the
 clusters: everything goes through *ssh* and *rsync*.
 
-Without a command, the UI opens; it only draws a window for now. Press *q* or
-*ctrl-c* to quit.
+Without a command, the UI opens. See *THE UI*.
 
 # COMMANDS
 
@@ -94,6 +93,52 @@ Without a command, the UI opens; it only draws a window for now. Press *q* or
 *drop* _COMMIT_
 	Delete a snapshot, given by a hash prefix. Refused when a job is active in
 	it. Stray files are not a reason to refuse. Confirmed.
+
+# THE UI
+
+Three panels on the left: *1* Hosts, *2* Jobs of the selected host, newest
+first, and *3* Snapshots. The main view shows the selection; the log panel
+shows every command lazyslurm runs and the output of hooks. The UI calls the
+same functions as the commands above, one task at a time, in the background.
+It refreshes every 120 seconds and on *R*.
+
+*1* *2* *3*, *[* *]*, *tab*
+	Go to a panel.
+
+*j* *k*, arrows
+	Move. *J* and *K* scroll the main view.
+
+*enter*
+	On a host, select it. On a job, read its log.
+
+*/*
+	Filter the jobs by job id, script or note.
+
+*P* *p*
+	Push, pull.
+
+*s*
+	Submit: pick a script from *scripts*, then type its arguments, the sbatch
+	options and a note, then confirm.
+
+*x*
+	Run a command with *srun*, as *exec* does. The UI steps aside until the
+	command ends.
+
+*r* *c*
+	Retry, cancel the selected job, after a confirmation.
+
+*l*
+	Read the log of the selected job, and the state of each of its tasks.
+
+*d*
+	Drop the selected snapshot, after a confirmation.
+
+*?*
+	Show the keys.
+
+*q*, *ctrl-c*
+	Quit.
 
 # OPTIONS
 

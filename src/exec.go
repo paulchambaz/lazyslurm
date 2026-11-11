@@ -23,7 +23,7 @@ func runExec(w io.Writer, root, hostFlag string, args []string) error {
 	if cfg.Srun == "" {
 		return fmt.Errorf("host %s has no srun key: exec is refused", cfg.Host)
 	}
-	s, err := syncUp(os.Stderr, root, cfg, false)
+	s, err := syncUp(hookOut, root, cfg, false)
 	if err != nil {
 		return fmt.Errorf("exec on %s: %w", cfg.Host, err)
 	}

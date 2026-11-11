@@ -3,11 +3,18 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
+
+// hookOut receives the output of hooks; the UI points it at its log panel.
+var hookOut io.Writer = os.Stderr
+
+// trace, when set, is told the command line of every command before it starts.
+var trace func(string)
 
 // command returns an exec.Cmd without LD_LIBRARY_PATH, so system tools work in a nix shell.
 func command(name string, args ...string) *exec.Cmd {
@@ -16,6 +23,9 @@ func command(name string, args ...string) *exec.Cmd {
 		if !strings.HasPrefix(e, "LD_LIBRARY_PATH=") {
 			c.Env = append(c.Env, e)
 		}
+	}
+	if trace != nil {
+		trace(strings.Join(c.Args, " "))
 	}
 	return c
 }

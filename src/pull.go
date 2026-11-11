@@ -66,7 +66,7 @@ func runPull(w io.Writer, root, hostFlag string, asJSON bool, args []string) err
 	if err != nil {
 		return err
 	}
-	n, dropped, err := pullFrom(os.Stderr, root, cfg)
+	n, dropped, err := pullFrom(hookOut, root, cfg)
 	if err != nil {
 		return fmt.Errorf("pull from %s: %w", cfg.Host, err)
 	}
