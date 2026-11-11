@@ -88,3 +88,23 @@ func TestRefreshUsesOneCommandOnTheCluster(t *testing.T) {
 		t.Errorf("refresh ran %d commands, want 1", calls)
 	}
 }
+
+func TestFullCommitsExpandsShortHashes(t *testing.T) {
+	root := jobRepo(t, Target{Dir: filepath.Join(t.TempDir(), "t")}, "")
+	c := command("git", "rev-parse", "HEAD")
+	c.Dir = root
+	out, err := c.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := strings.TrimSpace(string(out))
+	jobs := []Job{{Job: "1", Commit: full[:7]}, {Job: "2", Commit: "deadbee"}, {Job: "3"}}
+	got, err := fullCommits(root, jobs, nil)
+	if err != nil || got[full[:7]] != full || got["deadbee"] != "" || len(got) != 1 {
+		t.Errorf("full commits = %v, %v", got, err)
+	}
+	again, err := fullCommits(root, jobs, got)
+	if err != nil || len(again) != 1 {
+		t.Errorf("second call = %v, %v", again, err)
+	}
+}

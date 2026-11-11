@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -15,15 +16,17 @@ import (
 
 const (
 	popupView    = "popup"
+	suggestView  = "suggest"
 	optionsView  = "options"
 	mainView     = "main"
 	logView      = "log"
 	refreshEvery = 120 * time.Second
 	logKept      = 500
 	logTail      = 200
-	spinEvery    = 100 * time.Millisecond
-	spinFrames   = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+	spinEvery    = 180 * time.Millisecond
 )
+
+var spinFrames = []string{"●∙∙", "∙●∙", "∙∙●", "∙●∙"}
 
 var taskNames = map[string]string{
 	"push": "Pushing", "pull": "Pulling", "submit": "Submitting", "retry": "Retrying",
@@ -37,6 +40,7 @@ var panelTitles = [panelCount]string{"[1]-Hosts", "[2]-Jobs", "[3]-Snapshots"}
 const helpText = ` 1 2 3  [ ]  tab   go to a panel
  j k  arrows       move
  enter             select a host, or read the log of a job
+ 0                 go to the main view, to scroll it with j k (esc to leave)
  J K               scroll the main view
  /                 filter the jobs
  R                 refresh now
@@ -44,7 +48,7 @@ const helpText = ` 1 2 3  [ ]  tab   go to a panel
  s                 submit a script
  :                 run a command with srun in work/
  r  c              retry, cancel the selected job
- l                 read the log of the selected job
+ L                 read the log of the selected job
  d                 drop the selected snapshot
  q  ctrl-c         quit
 `
@@ -56,6 +60,7 @@ const (
 	inputPopup
 	pickPopup
 	helpPopup
+	filterPopup
 )
 
 type popup struct {
@@ -66,6 +71,10 @@ type popup struct {
 	items []string
 	sel   int
 	ok    func(string)
+
+	history []string
+	matches []string
+	focus   bool
 }
 
 type logbuf struct {
@@ -116,6 +125,8 @@ type tui struct {
 	timer  *time.Timer
 	auto   bool
 	scroll int
+	inMain bool
+	past   []string
 }
 
 func newTUI(g *gocui.Gui, root string, hosts []string, host string, cfg Config) *tui {
@@ -152,6 +163,10 @@ func runTUI(root, hostFlag string) error {
 	defer g.Close()
 	u := newTUI(g, root, hosts, host, cfg)
 	u.auto = true
+	u.past, err = readHistory(root)
+	if err != nil {
+		u.log.add("error: " + err.Error())
+	}
 	hookOut = u.log
 	defer func() { hookOut = os.Stderr }()
 	g.SetManagerFunc(u.layout)
@@ -210,9 +225,6 @@ func (u *tui) spin() {
 func (u *tui) finish(label string, err error, f fresh, rerr error, apply func()) {
 	u.m.busy = false
 	u.m.fresh = f
-	if rerr == nil {
-		u.m.at = time.Now()
-	}
 	u.m.clamp()
 	if apply != nil {
 		apply()
@@ -258,7 +270,21 @@ func (u *tui) collect(titles, got []string, done func([]string)) {
 }
 
 func (u *tui) focusOn(p panel) error {
-	u.m.focus, u.scroll = p, 0
+	u.m.focus, u.scroll, u.inMain = p, 0, false
+	return nil
+}
+
+func (u *tui) focusMain() error {
+	u.inMain = true
+	return nil
+}
+
+func (u *tui) back() error {
+	if !u.inMain && u.m.filter != "" {
+		u.m.filter = ""
+		u.m.clamp()
+	}
+	u.inMain = false
 	return nil
 }
 
@@ -267,6 +293,9 @@ func (u *tui) cycle(delta int) error {
 }
 
 func (u *tui) move(delta int) error {
+	if u.inMain {
+		return u.scrollMain(delta)
+	}
 	u.m.move(delta)
 	u.scroll = 0
 	return nil
@@ -416,10 +445,7 @@ func (u *tui) logsOf() error {
 }
 
 func (u *tui) filter() error {
-	u.open(&popup{kind: inputPopup, title: "Filter", text: u.m.filter, ok: func(s string) {
-		u.m.filter = s
-		u.m.clamp()
-	}})
+	u.open(&popup{kind: filterPopup, text: u.m.filter})
 	return nil
 }
 
@@ -432,9 +458,13 @@ func (u *tui) exec() error {
 	if !u.idle() {
 		return nil
 	}
-	u.open(&popup{kind: inputPopup, title: "Command in work/", ok: func(line string) {
+	u.open(&popup{kind: inputPopup, title: "Command:", history: u.past, ok: func(line string) {
 		if line == "" {
 			return
+		}
+		u.past = append([]string{line}, slices.DeleteFunc(slices.Clone(u.past), func(c string) bool { return c == line })...)
+		if err := addHistory(u.m.root, line); err != nil {
+			u.log.add("error: " + err.Error())
 		}
 		hookOut = os.Stderr
 		defer func() { hookOut = u.log }()
@@ -484,12 +514,14 @@ func (u *tui) bind() error {
 		{':', u.exec},
 		{'r', u.retry},
 		{'c', u.cancel},
-		{'l', u.logsOf},
+		{'L', u.logsOf},
+		{'0', u.focusMain},
+		{gocui.KeyEsc, u.back},
 		{'d', u.drop},
 		{'q', quit},
 	}
 	for _, k := range keys {
-		for _, name := range panelViews {
+		for _, name := range append(panelViews[:], mainView) {
 			fn := k.fn
 			if err := u.g.SetKeybinding(name, k.key, gocui.ModNone, func(*gocui.Gui, *gocui.View) error { return fn() }); err != nil {
 				return err
@@ -509,6 +541,7 @@ func (u *tui) bind() error {
 		{'?', func(*gocui.View) error { return u.dismiss() }},
 		{gocui.KeyEsc, func(*gocui.View) error { return u.dismiss() }},
 		{gocui.KeyEnter, u.accept},
+		{gocui.KeyTab, func(*gocui.View) error { return u.focusSuggestions(true) }},
 		{'j', func(*gocui.View) error { return u.pick(1) }},
 		{gocui.KeyArrowDown, func(*gocui.View) error { return u.pick(1) }},
 		{'k', func(*gocui.View) error { return u.pick(-1) }},
@@ -519,10 +552,52 @@ func (u *tui) bind() error {
 			return err
 		}
 	}
+	for _, k := range []struct {
+		key any
+		fn  func() error
+	}{
+		{gocui.KeyTab, func() error { return u.focusSuggestions(false) }},
+		{gocui.KeyEsc, func() error { return u.focusSuggestions(false) }},
+		{gocui.KeyEnter, u.fill},
+		{'j', func() error { return u.pick(1) }},
+		{gocui.KeyArrowDown, func() error { return u.pick(1) }},
+		{'k', func() error { return u.pick(-1) }},
+		{gocui.KeyArrowUp, func() error { return u.pick(-1) }},
+	} {
+		fn := k.fn
+		if err := u.g.SetKeybinding(suggestView, k.key, gocui.ModNone, func(*gocui.Gui, *gocui.View) error { return fn() }); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (u *tui) focusSuggestions(on bool) error {
+	if p := u.pop; p != nil && p.kind == inputPopup && (!on || len(p.matches) > 0) {
+		p.focus = on
+	}
+	return nil
+}
+
+func (u *tui) fill() error {
+	p := u.pop
+	if p == nil || p.sel >= len(p.matches) {
+		return nil
+	}
+	p.focus = false
+	if v, err := u.g.View(popupView); err == nil {
+		v.ClearTextArea()
+		v.TextArea.TypeString(p.matches[p.sel])
+		v.RenderTextArea()
+	}
 	return nil
 }
 
 func (u *tui) dismiss() error {
+	if u.pop != nil && u.pop.kind == filterPopup {
+		u.m.filter = ""
+		u.m.clamp()
+	}
 	u.pop = nil
 	return nil
 }
@@ -538,8 +613,13 @@ func (u *tui) yes() error {
 }
 
 func (u *tui) pick(delta int) error {
-	if p := u.pop; p != nil && p.kind == pickPopup {
+	p := u.pop
+	switch {
+	case p == nil:
+	case p.kind == pickPopup:
 		p.sel = max(0, min(p.sel+delta, len(p.items)-1))
+	case p.kind == inputPopup:
+		p.sel = max(0, min(p.sel+delta, len(p.matches)-1))
 	}
 	return nil
 }
@@ -551,6 +631,9 @@ func (u *tui) accept(v *gocui.View) error {
 	}
 	u.pop = nil
 	switch p.kind {
+	case filterPopup:
+		u.m.filter = strings.TrimSpace(v.TextArea.GetContent())
+		u.m.clamp()
 	case inputPopup:
 		p.ok(strings.TrimSpace(v.TextArea.GetContent()))
 	case pickPopup:
@@ -595,28 +678,26 @@ func showList(v *gocui.View, lines []string, sel int) {
 
 var panelKeys = [panelCount]string{
 	"Select: enter | Push: P | Pull: p | Cmd: : | Refresh: R | Help: ?",
-	"Log: l | Submit: s | Retry: r | Cancel: c | Push: P | Pull: p | Filter: / | Cmd: : | Help: ?",
+	"Log: L | Submit: s | Retry: r | Cancel: c | Push: P | Pull: p | Filter: / | Cmd: : | Help: ?",
 	"Drop: d | Push: P | Pull: p | Cmd: : | Refresh: R | Help: ?",
 }
 
-func (u *tui) options(width int) string {
-	left := panelKeys[u.m.focus]
-	if u.m.filter != "" {
-		left = "filter: " + u.m.filter + " | " + left
+func (u *tui) options() string {
+	if u.pop != nil && u.pop.kind == filterPopup {
+		return " Filter:"
 	}
-	right := fmt.Sprintf("%d active", u.m.active())
-	if !u.m.at.IsZero() {
-		right += " | " + u.m.at.Format("15:04")
+	keys := panelKeys[u.m.focus]
+	if u.inMain {
+		keys = "Scroll: j/k | Page: J/K | Back: esc | Help: ?"
+	}
+	if u.m.filter != "" {
+		keys = "filter: " + u.m.filter + " | " + keys
 	}
 	if u.m.busy {
-		frames := []rune(spinFrames)
-		left = taskNames[u.m.task] + " " + string(frames[int(time.Now().UnixMilli()/100)%len(frames)])
+		status := taskNames[u.m.task] + " " + spinFrames[int(time.Now().UnixMilli()/int64(spinEvery/time.Millisecond))%len(spinFrames)]
+		return " " + paint(cyan, status) + " " + paint(blue, keys)
 	}
-	pad := width - len([]rune(left)) - len([]rune(right)) - 4
-	if pad < 1 {
-		return " " + paint(blue, left)
-	}
-	return " " + paint(blue, left) + strings.Repeat(" ", pad) + paint(grey, right)
+	return " " + paint(blue, keys)
 }
 
 func wrapLog(lines []string, width int) []string {
@@ -649,6 +730,12 @@ func (u *tui) layout(g *gocui.Gui) error {
 		return nil
 	}
 	m := u.m
+	if p := u.pop; p != nil && p.kind == filterPopup && p.id == u.drawn {
+		if v, err := g.View(popupView); err == nil {
+			m.filter = strings.TrimSpace(v.TextArea.GetContent())
+			m.clamp()
+		}
+	}
 	left := max(w/3, 24)
 	rows := h - 1
 	hostsEnd := min(len(m.hosts), 3) + 2
@@ -659,7 +746,6 @@ func (u *tui) layout(g *gocui.Gui) error {
 	}
 	mainEnd := rows * 2 / 3
 	g.Highlight, g.SelFrameColor = true, gocui.ColorGreen|gocui.AttrBold
-	lists := [panelCount][]string{m.hostLines(), m.jobLines(), m.snapLines()}
 	spans := [panelCount][2]int{{0, hostsEnd - 1}, {hostsEnd, jobsEnd - 1}, {jobsEnd, rows - 1}}
 	for p := range panelCount {
 		v, _, err := place(g, panelViews[p], 0, spans[p][0], left-1, spans[p][1])
@@ -667,17 +753,25 @@ func (u *tui) layout(g *gocui.Gui) error {
 			return err
 		}
 		v.Title = panelTitles[p]
-		showList(v, lists[p], m.sel[p])
+		lines := m.hostLines()
+		switch p {
+		case jobsPanel:
+			lines = m.jobLines(v.InnerWidth() - 1)
+		case snapsPanel:
+			lines = m.snapLines()
+		}
+		showList(v, lines, m.sel[p])
 	}
 	v, _, err := place(g, mainView, left, 0, w-1, mainEnd-1)
 	if err != nil {
 		return err
 	}
 	title, text := m.detail()
-	v.Title = title
+	v.Title = "[0]-" + title
 	v.Clear()
 	fmt.Fprint(v, " "+strings.ReplaceAll(text, "\n", "\n "))
-	v.SetOrigin(0, min(u.scroll, max(0, strings.Count(text, "\n")+1-v.InnerHeight())))
+	u.scroll = min(u.scroll, max(0, strings.Count(text, "\n")+1-v.InnerHeight()))
+	v.SetOrigin(0, u.scroll)
 	v, _, err = place(g, logView, left, mainEnd, w-1, rows-1)
 	if err != nil {
 		return err
@@ -692,28 +786,77 @@ func (u *tui) layout(g *gocui.Gui) error {
 	}
 	v.Frame = false
 	v.Clear()
-	fmt.Fprint(v, u.options(w))
+	fmt.Fprint(v, u.options())
 	if err := u.drawPopup(g, w, h); err != nil {
 		return err
 	}
 	name := panelViews[m.focus]
+	if u.inMain {
+		name = mainView
+	}
 	if u.pop != nil {
 		name = popupView
+		if u.pop.focus {
+			name = suggestView
+		}
 	}
 	_, err = g.SetCurrentView(name)
+	return err
+}
+
+func (u *tui) drawSuggestions(g *gocui.Gui, p *popup, typed string, x0, y0, width, h int) error {
+	p.matches = matching(p.history, strings.TrimSpace(typed))
+	p.sel = max(0, min(p.sel, len(p.matches)-1))
+	if len(p.matches) == 0 {
+		p.focus = false
+		if err := g.DeleteView(suggestView); err != nil && !unknownView(err) {
+			return err
+		}
+		return nil
+	}
+	rows := max(1, min(len(p.matches), min(8, h-y0-3)))
+	v, _, err := place(g, suggestView, x0, y0, x0+width-1, y0+rows+1)
+	if err != nil {
+		return err
+	}
+	v.Title = "Suggestions (press <tab> to focus)"
+	showList(v, p.matches, p.sel)
+	v.Highlight = p.focus
+	_, err = g.SetViewOnTop(suggestView)
+	return err
+}
+
+func (u *tui) drawFilter(g *gocui.Gui, p *popup, w, h int) error {
+	v, created, err := place(g, popupView, 8, h-2, w, h)
+	if err != nil {
+		return err
+	}
+	u.drawn = p.id
+	v.Frame = false
+	if created {
+		v.Editable, v.Editor = true, gocui.DefaultEditor
+		v.TextArea.TypeString(p.text)
+		v.RenderTextArea()
+	}
+	_, err = g.SetViewOnTop(popupView)
 	return err
 }
 
 func (u *tui) drawPopup(g *gocui.Gui, w, h int) error {
 	p := u.pop
 	if p == nil || p.id != u.drawn {
-		if err := g.DeleteView(popupView); err != nil && !unknownView(err) {
-			return err
+		for _, name := range []string{popupView, suggestView} {
+			if err := g.DeleteView(name); err != nil && !unknownView(err) {
+				return err
+			}
 		}
 		u.drawn = 0
 	}
 	if p == nil {
 		return nil
+	}
+	if p.kind == filterPopup {
+		return u.drawFilter(g, p, w, h)
 	}
 	width, height := min(w-4, 64), 3
 	switch p.kind {
@@ -730,7 +873,7 @@ func (u *tui) drawPopup(g *gocui.Gui, w, h int) error {
 		return err
 	}
 	u.drawn = p.id
-	v.Title = p.title
+	v.Title, v.TitleColor = p.title, gocui.ColorDefault|gocui.AttrBold
 	switch p.kind {
 	case confirmPopup:
 		v.Clear()
@@ -740,6 +883,9 @@ func (u *tui) drawPopup(g *gocui.Gui, w, h int) error {
 			v.Editable, v.Editor = true, gocui.DefaultEditor
 			v.TextArea.TypeString(p.text)
 			v.RenderTextArea()
+		}
+		if err := u.drawSuggestions(g, p, v.TextArea.GetContent(), x0, y0+height, width, h); err != nil {
+			return err
 		}
 	case pickPopup:
 		showList(v, p.items, p.sel)

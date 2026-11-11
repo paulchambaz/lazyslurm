@@ -1,12 +1,14 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
-	"time"
+	"unicode/utf8"
 )
 
 type panel int
@@ -23,6 +25,7 @@ type fresh struct {
 	jobs   []Job
 	states map[string]jobState
 	snaps  []snapshotInfo
+	commit map[string]string
 }
 
 type model struct {
@@ -37,7 +40,6 @@ type model struct {
 	busy   bool
 	task   string
 	logs   map[string]string
-	at     time.Time
 }
 
 func (m *model) visibleJobs() []Job {
@@ -135,15 +137,6 @@ func sortedStates(states map[string]int) []string {
 	return names
 }
 
-func jobMark(states map[string]int) string {
-	names := sortedStates(states)
-	if len(names) == 0 {
-		return paint(grey, "·")
-	}
-	g := stateGlyph(names[0])
-	return paint(g.color, g.mark)
-}
-
 func compactCounts(states map[string]int) string {
 	var parts []string
 	for _, name := range sortedStates(states) {
@@ -162,26 +155,37 @@ func namedCounts(states map[string]int) string {
 	return strings.Join(parts, "  ")
 }
 
+var escapes = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+func plainText(s string) string { return escapes.ReplaceAllString(s, "") }
+
 func field(name, value string) string {
 	return paint(blue, fmt.Sprintf("%-9s", name)) + " " + value + "\n"
 }
 
-func (m *model) jobLine(j Job) string {
-	line := jobMark(m.states[j.Job].States) + " " + paint(yellow, j.Job) + "  " + strings.TrimSuffix(filepath.Base(j.Script), ".sh")
-	if st, ok := m.states[j.Job]; ok && len(st.States) > 0 {
-		line += "  " + compactCounts(st.States)
+func ellipsize(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
 	}
-	return line
+	if n < 5 {
+		return string(runes[:max(n, 0)])
+	}
+	head := (n - 3) / 2
+	tail := n - 3 - head
+	return string(runes[:head]) + "..." + string(runes[len(runes)-tail:])
 }
 
-func (m *model) active() int {
-	n := 0
-	for _, st := range m.states {
-		if !st.Final {
-			n++
-		}
+func (m *model) jobLine(j Job, width int) string {
+	counts := compactCounts(m.states[j.Job].States)
+	space := utf8.RuneCountInString(plainText(counts))
+	room := width - len(j.Job) - space - 4
+	name := ""
+	if room > 0 {
+		name = ellipsize(filepath.Base(j.Script), room)
+		name += strings.Repeat(" ", room-utf8.RuneCountInString(name))
 	}
-	return n
+	return paint(yellow, j.Job) + "  " + name + "  " + counts
 }
 
 func snapLine(s snapshotInfo) string {
@@ -206,11 +210,11 @@ func (m *model) hostLines() []string {
 	return lines
 }
 
-func (m *model) jobLines() []string {
+func (m *model) jobLines(width int) []string {
 	jobs := m.visibleJobs()
 	lines := make([]string, len(jobs))
 	for i, j := range jobs {
-		lines[i] = m.jobLine(j)
+		lines[i] = m.jobLine(j, width)
 	}
 	return lines
 }
@@ -246,7 +250,7 @@ func (m *model) detail() (title, text string) {
 		b.WriteString(field("job", j.Job+" on "+j.Host))
 		b.WriteString(field("time", j.Time))
 		b.WriteString(field("script", j.Script+" "+strings.Join(j.Args, " ")))
-		b.WriteString(field("commit", j.Commit))
+		b.WriteString(field("commit", cmp.Or(m.commit[j.Commit], j.Commit)))
 		for _, f := range []struct{ name, value string }{
 			{"sbatch", j.Sbatch}, {"note", j.Note}, {"array", j.Array}, {"retry of", j.RetryOf},
 		} {

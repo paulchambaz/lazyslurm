@@ -101,8 +101,8 @@ first, and *3* Snapshots. The main view shows the selection; the log panel
 shows the results of the tasks, the output of hooks and the errors, and no
 command lines. Each job starts with a mark: a green check when it completed, a
 red cross when a task failed, a cyan dot while it runs, a yellow circle while
-it waits, a magenta slash when it was cancelled. A spinner and the name of the
-task replace the keys at the bottom while one runs. The UI calls the same
+it waits, a magenta slash when it was cancelled. While a task runs, its name and
+an animated dot appear at the bottom left, before the keys. The UI calls the same
 functions as the commands above, one task at a time, in the background. It
 refreshes every 120 seconds and on *R*, with a single command on the cluster.
 
@@ -112,11 +112,16 @@ refreshes every 120 seconds and on *R*, with a single command on the cluster.
 *j* *k*, arrows
 	Move. *J* and *K* scroll the main view.
 
+*0*
+	Go to the main view, to scroll it with *j* and *k*. *esc* or a panel key
+	leaves it.
+
 *enter*
 	On a host, select it. On a job, read its log.
 
 */*
-	Filter the jobs by job id, script or note.
+	Filter the jobs by job id, script or note, as you type on the bottom line.
+	*enter* keeps the filter, *esc* clears it.
 
 *P* *p*
 	Push, pull.
@@ -126,13 +131,15 @@ refreshes every 120 seconds and on *R*, with a single command on the cluster.
 	options and a note, then confirm.
 
 *:*
-	Type a command and run it in _work/_ with *srun*, as *exec* does. The UI
-	steps aside, shows the output, and comes back on *enter*.
+	Type a command and run it in _work/_ with *srun*, as *exec* does. Past
+	commands are listed below the prompt, kept in _.slurm/history_; *tab* moves
+	to the list and *enter* copies one into the prompt. The UI steps aside,
+	shows the output, and comes back on *enter*.
 
 *r* *c*
 	Retry, cancel the selected job, after a confirmation.
 
-*l*
+*L*
 	Read the log of the selected job, and the state of each of its tasks.
 
 *d*

@@ -15,7 +15,7 @@ const (
 
 // refresh reads the journal and asks the host for states and snapshots, keeping prev where a step fails.
 func refresh(root string, cfg Config, prev fresh) (fresh, error) {
-	f := fresh{jobs: prev.jobs, states: prev.states, snaps: prev.snaps}
+	f := fresh{jobs: prev.jobs, states: prev.states, snaps: prev.snaps, commit: prev.commit}
 	journal, err := readJournal(root)
 	if err != nil {
 		return f, err
@@ -81,7 +81,37 @@ func refresh(root string, cfg Config, prev fresh) (fresh, error) {
 		dirs = append(dirs, d...)
 	}
 	f.snaps = classify(snaps, owned, f.states, dirs, dir, strayOf(root, cfg, sec["files"]))
-	return f, nil
+	f.commit, err = fullCommits(root, f.jobs, prev.commit)
+	return f, err
+}
+
+func fullCommits(root string, jobs []Job, prev map[string]string) (map[string]string, error) {
+	var asked []string
+	for _, j := range jobs {
+		if _, ok := prev[j.Commit]; j.Commit != "" && !ok && !slices.Contains(asked, j.Commit) {
+			asked = append(asked, j.Commit)
+		}
+	}
+	if len(asked) == 0 {
+		return prev, nil
+	}
+	c := command("git", "cat-file", "--batch-check=%(objectname)")
+	c.Dir = root
+	c.Stdin = strings.NewReader(strings.Join(asked, "\n") + "\n")
+	out, err := c.Output()
+	if err != nil {
+		return prev, fmt.Errorf("full commit hashes: %w", err)
+	}
+	full := maps.Clone(prev)
+	if full == nil {
+		full = map[string]string{}
+	}
+	for i, line := range strings.Split(string(out), "\n") {
+		if i < len(asked) && commitName.MatchString(line) {
+			full[asked[i]] = line
+		}
+	}
+	return full, nil
 }
 
 func sections(out string) map[string]string {

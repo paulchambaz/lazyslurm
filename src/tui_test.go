@@ -268,10 +268,10 @@ func TestWrapLogKeepsEveryRuneAndColorsErrors(t *testing.T) {
 	}
 }
 
-func TestOptionsShowTheRunningTask(t *testing.T) {
+func TestOptionsShowTheRunningTaskBeforeTheKeys(t *testing.T) {
 	u := newTestTUI(t, scriptRepo(t, ""))
 	u.m.busy, u.m.task = true, "push"
-	if o := plain(u.options(120)); !strings.Contains(o, "Pushing ") || strings.Contains(o, "Cancel: c") {
+	if o := plain(u.options()); !strings.Contains(o, "Pushing ") || !strings.Contains(o, "Cancel: c") || !strings.ContainsAny(o, "●") {
 		t.Errorf("options = %q", o)
 	}
 }
@@ -280,15 +280,117 @@ func TestOptionsFollowTheFocusAndColonOpensTheCommandPopup(t *testing.T) {
 	root := scriptRepo(t, "")
 	u := newTestTUI(t, root)
 	u.focusOn(snapsPanel)
-	if o := u.options(120); !strings.Contains(o, "Drop: d") || strings.Contains(o, "Cancel: c") {
+	if o := u.options(); !strings.Contains(o, "Drop: d") || strings.Contains(o, "Cancel: c") {
 		t.Errorf("snapshots options = %q", o)
 	}
 	u.focusOn(jobsPanel)
-	if o := u.options(120); !strings.Contains(o, "Cancel: c") || !strings.Contains(o, "Cmd: :") {
+	if o := u.options(); !strings.Contains(o, "Cancel: c") || !strings.Contains(o, "Cmd: :") {
 		t.Errorf("jobs options = %q", o)
 	}
 	u.exec()
-	if u.pop == nil || u.pop.kind != inputPopup || u.pop.title != "Command in work/" {
+	if u.pop == nil || u.pop.kind != inputPopup || u.pop.title != "Command:" {
 		t.Errorf("popup = %v", u.pop)
+	}
+}
+
+func TestCommandPopupSuggestsTheHistory(t *testing.T) {
+	u := newTestTUI(t, scriptRepo(t, ""))
+	u.past = []string{"ls", "nvidia-smi", "python -V"}
+	u.exec()
+	u.settle(t)
+	sv, err := u.g.View(suggestView)
+	if err != nil || !strings.Contains(sv.Buffer(), "nvidia-smi") || !strings.Contains(sv.Buffer(), "ls") {
+		t.Fatalf("suggestions = %v, %v", sv, err)
+	}
+	pv, _ := u.g.View(popupView)
+	pv.TextArea.TypeString("nv")
+	u.settle(t)
+	if strings.Contains(sv.Buffer(), "python") || !strings.Contains(sv.Buffer(), "nvidia-smi") {
+		t.Errorf("filtered suggestions = %q", sv.Buffer())
+	}
+	u.focusSuggestions(true)
+	u.settle(t)
+	if u.g.CurrentView() != sv {
+		t.Errorf("current view = %v, want the suggestions", u.g.CurrentView())
+	}
+	u.fill()
+	u.settle(t)
+	if got := pv.TextArea.GetContent(); got != "nvidia-smi" || u.g.CurrentView() != pv {
+		t.Errorf("input = %q, current %v", got, u.g.CurrentView())
+	}
+	u.dismiss()
+	u.settle(t)
+	if _, err := u.g.View(suggestView); err == nil {
+		t.Error("suggestions still drawn after the popup closed")
+	}
+}
+
+func TestMainViewTakesTheFocusAndScrolls(t *testing.T) {
+	setupFakeSlurm(t)
+	u := newTestTUI(t, scriptRepo(t, ""))
+	u.focusOn(jobsPanel)
+	u.m.fresh.jobs = []Job{{Job: "7", Host: "h", Script: "slurm/run.sh"}}
+	u.m.logs["7"] = strings.Repeat("line\n", 80)
+	u.settle(t)
+	main, _ := u.g.View(mainView)
+	if main.Title != "[0]-Job 7" {
+		t.Errorf("title = %q", main.Title)
+	}
+	u.focusMain()
+	u.move(3)
+	u.settle(t)
+	if u.g.CurrentView() != main || u.scroll != 3 || u.m.sel[jobsPanel] != 0 {
+		t.Errorf("current %v, scroll %d, sel %d", u.g.CurrentView(), u.scroll, u.m.sel[jobsPanel])
+	}
+	if o := plain(u.options()); !strings.Contains(o, "Back: esc") {
+		t.Errorf("options = %q", o)
+	}
+	u.scrollMain(1000)
+	u.settle(t)
+	if u.scroll == 1003 {
+		t.Error("scroll is not clamped to the text")
+	}
+	u.back()
+	u.settle(t)
+	jobs, _ := u.g.View("jobs")
+	if u.g.CurrentView() != jobs {
+		t.Errorf("current view = %v after esc", u.g.CurrentView())
+	}
+}
+
+func TestFilterIsInlineLiveAndEscClearsIt(t *testing.T) {
+	u := newTestTUI(t, scriptRepo(t, ""))
+	u.m.fresh.jobs = []Job{{Job: "1", Script: "slurm/a.sh"}, {Job: "2", Script: "slurm/b.sh"}}
+	u.filter()
+	u.settle(t)
+	p, _ := u.g.View(popupView)
+	if p.Frame || p.Title != "" {
+		t.Errorf("filter prompt has a frame or a title: %v %q", p.Frame, p.Title)
+	}
+	if o, _ := u.g.View(optionsView); !strings.Contains(o.Buffer(), "Filter:") {
+		t.Errorf("options = %q", o.Buffer())
+	}
+	p.TextArea.TypeString("b.sh")
+	u.settle(t)
+	if jobs, _ := u.g.View("jobs"); strings.Contains(jobs.Buffer(), "a.sh") || len(u.m.visibleJobs()) != 1 {
+		t.Errorf("jobs not filtered while typing: %q", jobs.Buffer())
+	}
+	u.accept(p)
+	u.settle(t)
+	if u.m.filter != "b.sh" || u.pop != nil {
+		t.Errorf("filter %q, popup %v after enter", u.m.filter, u.pop)
+	}
+	u.back()
+	if u.m.filter != "" || len(u.m.visibleJobs()) != 2 {
+		t.Errorf("esc did not clear the filter: %q", u.m.filter)
+	}
+	u.filter()
+	u.settle(t)
+	p, _ = u.g.View(popupView)
+	p.TextArea.TypeString("a.sh")
+	u.settle(t)
+	u.dismiss()
+	if u.m.filter != "" {
+		t.Errorf("esc while typing kept the filter %q", u.m.filter)
 	}
 }

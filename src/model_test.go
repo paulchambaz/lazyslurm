@@ -1,14 +1,12 @@
 package main
 
 import (
-	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
-var escapes = regexp.MustCompile("\x1b\\[[0-9;]*m")
-
-func plain(s string) string { return escapes.ReplaceAllString(s, "") }
+func plain(s string) string { return plainText(s) }
 
 func testModel() *model {
 	return &model{
@@ -84,30 +82,38 @@ func TestDetailTexts(t *testing.T) {
 	}
 }
 
-func TestJobLineShowsTheOutcomeAtAGlance(t *testing.T) {
+func TestJobLineIsIdNameAndCounts(t *testing.T) {
 	m := testModel()
-	got := m.jobLine(m.jobs[0])
-	if plain(got) != "● 12  train  ●1" || !strings.HasPrefix(got, paint(cyan, "●")) {
+	got := plain(m.jobLine(m.jobs[0], 30))
+	if utf8.RuneCountInString(got) != 30 || !strings.HasPrefix(got, "12  train.sh ") || !strings.HasSuffix(got, "  ●1") {
 		t.Errorf("running job line = %q", got)
 	}
-	m.states["11"] = jobState{States: map[string]int{"COMPLETED": 34, "FAILED": 2}, Final: true}
-	got = m.jobLine(m.jobs[1])
-	if plain(got) != "✗ 11  eval  ✗2 ✓34" || !strings.HasPrefix(got, paint(red, "✗")) {
+	m.states["11"] = jobState{States: map[string]int{"COMPLETED": 34, "FAILED": 1, "CANCELLED": 2}, Final: true}
+	line := m.jobLine(m.jobs[1], 30)
+	got = plain(line)
+	if utf8.RuneCountInString(got) != 30 || !strings.HasPrefix(got, "11  eval.sh ") || !strings.HasSuffix(got, "  ✗1 ⊘2 ✓34") {
 		t.Errorf("failed job line = %q", got)
 	}
-	m.states["11"] = jobState{States: map[string]int{"COMPLETED": 3}, Final: true}
-	if got = m.jobLine(m.jobs[1]); !strings.HasPrefix(got, paint(green, "✓")) {
-		t.Errorf("completed job line = %q", got)
+	if !strings.Contains(line, paint(red, "✗1")) || !strings.Contains(line, paint(green, "✓34")) {
+		t.Errorf("counts not colored: %q", line)
 	}
-	if got = (&model{}).jobLine(Job{Job: "5", Script: "a.sh"}); plain(got) != "· 5  a" {
-		t.Errorf("unknown job line = %q", got)
+	if got = plain(m.jobLine(Job{Job: "5", Script: "slurm/averylongscriptname.sh"}, 20)); got != "5  averyl...ame.sh  " {
+		t.Errorf("long name line = %q", got)
 	}
 }
 
-func TestActiveCountsJobsNotFinal(t *testing.T) {
-	m := testModel()
-	m.states["11"] = jobState{Final: true}
-	if m.active() != 1 {
-		t.Errorf("active = %d, want 1", m.active())
+func TestEllipsizeKeepsTheEnd(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		n    int
+		want string
+	}{
+		{"go2-recipes-02.sh", 20, "go2-recipes-02.sh"},
+		{"go2-recipes-02.sh", 13, "go2-r...02.sh"},
+		{"abcdef", 3, "abc"},
+	} {
+		if got := ellipsize(c.in, c.n); got != c.want {
+			t.Errorf("ellipsize(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
+		}
 	}
 }
