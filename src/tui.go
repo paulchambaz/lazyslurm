@@ -867,9 +867,9 @@ func showList(v *gocui.View, lines []string, sel int) {
 }
 
 var panelKeys = [panelCount]string{
-	"Select: enter | Push: P | Pull: p | Cmd: : | Refresh: R | Help: ?",
-	"Log: L | Submit: s | Retry: r | Cancel: c | Push: P | Pull: p | Filter: / | Cmd: : | Help: ?",
-	"Drop: d | Push: P | Pull: p | Cmd: : | Refresh: R | Help: ?",
+	"Select: enter | Push: P | Pull: p | Clean: C | Cmd: : | Refresh: R | Help: ?",
+	"Log: L | Submit: s | Retry: r | Cancel: c | Push: P | Pull: p | Clean: C | Filter: / | Cmd: : | Help: ?",
+	"Drop: d | Push: P | Pull: p | Clean: C | Cmd: : | Refresh: R | Help: ?",
 }
 
 func (u *tui) options(width int) string {
