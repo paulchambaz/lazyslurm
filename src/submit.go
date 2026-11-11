@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -18,14 +17,7 @@ func checkScript(root string, cfg Config, script string) error {
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("%s is not tracked by git", script)
 	}
-	isDirty, err := dirty(root, cfg)
-	if err != nil {
-		return err
-	}
-	if isDirty {
-		return errors.New("the tree under push is not clean: commit or stash first")
-	}
-	return nil
+	return requireClean(root, cfg)
 }
 
 type submitRow struct {

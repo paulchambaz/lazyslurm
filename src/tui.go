@@ -831,7 +831,7 @@ var panelKeys = [panelCount]string{
 	"Drop: d | Push: P | Pull: p | Cmd: : | Refresh: R | Help: ?",
 }
 
-func (u *tui) options() string {
+func (u *tui) options(width int) string {
 	if u.pop != nil && u.pop.kind == filterPopup {
 		return " Filter:"
 	}
@@ -842,11 +842,18 @@ func (u *tui) options() string {
 	if u.m.filter != "" {
 		keys = "filter: " + u.m.filter + " | " + keys
 	}
+	left, used := " "+paint(blue, keys), 1+len([]rune(keys))
 	if u.m.busy {
 		status := taskNames[u.m.task] + " " + spinFrames[int(time.Now().UnixMilli()/int64(spinEvery/time.Millisecond))%len(spinFrames)]
-		return " " + paint(cyan, status) + " " + paint(blue, keys)
+		left = " " + paint(cyan, status) + " " + paint(blue, keys)
+		used += len([]rune(status)) + 1
 	}
-	return " " + paint(blue, keys)
+	tag := strings.TrimSpace(version)
+	pad := width - used - len([]rune(tag)) - 1
+	if pad < 1 {
+		return left
+	}
+	return left + strings.Repeat(" ", pad) + paint(grey, tag) + " "
 }
 
 func wrapLog(lines []string, width int) []string {
@@ -940,7 +947,7 @@ func (u *tui) layout(g *gocui.Gui) error {
 	}
 	v.Frame = false
 	v.Clear()
-	fmt.Fprint(v, u.options())
+	fmt.Fprint(v, u.options(w))
 	if err := u.drawPopup(g, w, h); err != nil {
 		return err
 	}

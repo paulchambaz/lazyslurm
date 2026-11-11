@@ -71,7 +71,7 @@ func exists(path string) bool {
 func TestFileSet(t *testing.T) {
 	root := syncRepo(t)
 	got, err := fileSet(root, syncConfig(Target{}))
-	want := []string{"pyproject.toml", "src/a.py", "src/b.py", "src/new.py"}
+	want := []string{"pyproject.toml", "src/a.py", "src/b.py"}
 	if err != nil || !slices.Equal(got, want) {
 		t.Errorf("fileSet = %v, %v, want %v", got, err, want)
 	}
@@ -101,16 +101,16 @@ func TestPushMirrorsThePushSet(t *testing.T) {
 		root := syncRepo(t)
 		cfg := syncConfig(tg)
 		dir, sent, removed, err := pushOnce(t, root, cfg)
-		if err != nil || sent != 4 || removed != 0 {
+		if err != nil || sent != 3 || removed != 0 {
 			t.Fatalf("%s: first push = %d, %d, %v", name, sent, removed, err)
 		}
 		work := filepath.Join(dir, "work")
-		for _, f := range []string{"pyproject.toml", "src/a.py", "src/b.py", "src/new.py"} {
+		for _, f := range []string{"pyproject.toml", "src/a.py", "src/b.py"} {
 			if !exists(filepath.Join(work, f)) {
 				t.Errorf("%s: %s is missing", name, f)
 			}
 		}
-		for _, f := range []string{"other", "src/ignored.txt", "src/gone.py", "src/__pycache__"} {
+		for _, f := range []string{"other", "src/ignored.txt", "src/gone.py", "src/new.py", "src/__pycache__"} {
 			if exists(filepath.Join(work, f)) {
 				t.Errorf("%s: %s must not be sent", name, f)
 			}
@@ -135,6 +135,7 @@ func TestSecondPushSendsOnlyChangesAndPrunes(t *testing.T) {
 		write(t, filepath.Join(work, "src", "__pycache__", "kept.pyc"), "k\n")
 		write(t, filepath.Join(dir, "keep", "outputs", "r.txt"), "r\n")
 		write(t, filepath.Join(root, "src", "sub", "c.py"), "c\n")
+		gitRun(t, root, "add", "-A")
 		if _, _, _, err := pushOnce(t, root, cfg); err != nil {
 			t.Fatal(err)
 		}
@@ -245,5 +246,14 @@ func TestSnapshotReplacesALeftoverTmp(t *testing.T) {
 		if exists(filepath.Join(dir, "abc", "junk")) || exists(filepath.Join(dir, "abc.tmp")) {
 			t.Errorf("%s: leftover tmp survived", name)
 		}
+	}
+}
+
+func TestSyncUpRefusesAnUncleanTree(t *testing.T) {
+	root := syncRepo(t)
+	gitRun(t, root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c")
+	cfg := syncConfig(Target{Dir: t.TempDir()})
+	if _, err := syncUp(os.Stderr, root, cfg, false); err == nil || !strings.Contains(err.Error(), "not clean") {
+		t.Errorf("dirty tree: err = %v", err)
 	}
 }

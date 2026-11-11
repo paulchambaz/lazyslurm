@@ -31,15 +31,11 @@ func runExec(w io.Writer, root, hostFlag string, args []string) error {
 	if len(args) > 1 {
 		command = quoteAll(args)
 	}
-	d := "0"
-	if s.Dirty {
-		d = "1"
-	}
 	line := "cd " + quote(s.Dir+"/work")
 	if cfg.Prelude != "" {
 		line += " && " + cfg.Prelude
 	}
-	line += " && export GIT_COMMIT=" + s.Commit + " GIT_DIRTY=" + d
+	line += " && export GIT_COMMIT=" + s.Commit + " GIT_DIRTY=0"
 	line += " && srun " + cfg.Srun + " bash -c " + quote(command)
 	c, _ := cfg.Target.interactive(line, isTerminal(os.Stdin))
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, w, os.Stderr

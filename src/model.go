@@ -121,9 +121,9 @@ func stateGlyph(state string) glyph {
 	case strings.HasPrefix(state, "CANCELLED"):
 		return glyph{"⊘", magenta, 3}
 	case strings.HasPrefix(state, "COMPLETED"):
-		return glyph{"✓", green, 4}
+		return glyph{"✓", green, 2}
 	}
-	return glyph{"✗", red, 2}
+	return glyph{"✗", red, 4}
 }
 
 func sortedStates(states map[string]int) []string {
@@ -139,11 +139,26 @@ func sortedStates(states map[string]int) []string {
 
 func compactCounts(states map[string]int) string {
 	var parts []string
+	var last glyph
+	n := 0
+	flush := func() {
+		if n > 0 {
+			parts = append(parts, paint(last.color, strconv.Itoa(n)))
+		}
+	}
 	for _, name := range sortedStates(states) {
 		g := stateGlyph(name)
-		parts = append(parts, paint(g.color, g.mark+strconv.Itoa(states[name])))
+		if g != last {
+			flush()
+			last, n = g, 0
+		}
+		n += states[name]
 	}
-	return strings.Join(parts, " ")
+	flush()
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(parts, "/") + "]"
 }
 
 func namedCounts(states map[string]int) string {
@@ -176,16 +191,16 @@ func ellipsize(s string, n int) string {
 	return string(runes[:head]) + "..." + string(runes[len(runes)-tail:])
 }
 
-func (m *model) jobLine(j Job, width int) string {
+func (m *model) jobLine(j Job, width, idWidth, countsWidth int) string {
 	counts := compactCounts(m.states[j.Job].States)
-	space := utf8.RuneCountInString(plainText(counts))
-	room := width - len(j.Job) - space - 4
+	counts += strings.Repeat(" ", countsWidth-utf8.RuneCountInString(plainText(counts)))
+	room := width - idWidth - countsWidth - 4
 	name := ""
 	if room > 0 {
 		name = ellipsize(filepath.Base(j.Script), room)
 		name += strings.Repeat(" ", room-utf8.RuneCountInString(name))
 	}
-	return paint(yellow, j.Job) + "  " + name + "  " + counts
+	return paint(yellow, j.Job+strings.Repeat(" ", idWidth-len(j.Job))) + "  " + name + "  " + counts
 }
 
 func snapLine(s snapshotInfo) string {
@@ -212,9 +227,14 @@ func (m *model) hostLines() []string {
 
 func (m *model) jobLines(width int) []string {
 	jobs := m.visibleJobs()
+	idWidth, countsWidth := 0, 0
+	for _, j := range jobs {
+		idWidth = max(idWidth, len(j.Job))
+		countsWidth = max(countsWidth, utf8.RuneCountInString(plainText(compactCounts(m.states[j.Job].States))))
+	}
 	lines := make([]string, len(jobs))
 	for i, j := range jobs {
-		lines[i] = m.jobLine(j, width)
+		lines[i] = m.jobLine(j, width, idWidth, countsWidth)
 	}
 	return lines
 }

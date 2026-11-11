@@ -273,7 +273,7 @@ func TestWrapLogKeepsEveryRuneAndColorsErrors(t *testing.T) {
 func TestOptionsShowTheRunningTaskBeforeTheKeys(t *testing.T) {
 	u := newTestTUI(t, scriptRepo(t, ""))
 	u.m.busy, u.m.task = true, "push"
-	if o := plain(u.options()); !strings.Contains(o, "Pushing ") || !strings.Contains(o, "Cancel: c") || !strings.ContainsAny(o, "●") {
+	if o := plain(u.options(120)); !strings.Contains(o, "Pushing ") || !strings.Contains(o, "Cancel: c") || !strings.ContainsAny(o, "●") {
 		t.Errorf("options = %q", o)
 	}
 }
@@ -282,11 +282,11 @@ func TestOptionsFollowTheFocusAndColonOpensTheCommandPopup(t *testing.T) {
 	root := scriptRepo(t, "")
 	u := newTestTUI(t, root)
 	u.focusOn(snapsPanel)
-	if o := u.options(); !strings.Contains(o, "Drop: d") || strings.Contains(o, "Cancel: c") {
+	if o := u.options(120); !strings.Contains(o, "Drop: d") || strings.Contains(o, "Cancel: c") {
 		t.Errorf("snapshots options = %q", o)
 	}
 	u.focusOn(jobsPanel)
-	if o := u.options(); !strings.Contains(o, "Cancel: c") || !strings.Contains(o, "Cmd: :") {
+	if o := u.options(120); !strings.Contains(o, "Cancel: c") || !strings.Contains(o, "Cmd: :") {
 		t.Errorf("jobs options = %q", o)
 	}
 	u.exec()
@@ -344,7 +344,7 @@ func TestMainViewTakesTheFocusAndScrolls(t *testing.T) {
 	if u.g.CurrentView() != main || u.scroll != 3 || u.m.sel[jobsPanel] != 0 {
 		t.Errorf("current %v, scroll %d, sel %d", u.g.CurrentView(), u.scroll, u.m.sel[jobsPanel])
 	}
-	if o := plain(u.options()); !strings.Contains(o, "Back: esc") {
+	if o := plain(u.options(120)); !strings.Contains(o, "Back: esc") {
 		t.Errorf("options = %q", o)
 	}
 	u.scrollMain(1000)
@@ -576,5 +576,17 @@ func TestSubmitPreviewCanBeFocusedAndRead(t *testing.T) {
 	u.settle(t)
 	if u.g.CurrentView() != input {
 		t.Errorf("current view = %v, want the input", u.g.CurrentView())
+	}
+}
+
+func TestOptionsBarEndsWithTheVersion(t *testing.T) {
+	u := newTestTUI(t, scriptRepo(t, ""))
+	o := plain(u.options(120))
+	tag := strings.TrimSpace(version)
+	if !strings.HasSuffix(o, tag+" ") || len([]rune(o)) != 120 {
+		t.Errorf("options = %q (%d columns)", o, len([]rune(o)))
+	}
+	if o := plain(u.options(30)); strings.Contains(o, tag) {
+		t.Errorf("version kept in a bar that is too narrow: %q", o)
 	}
 }

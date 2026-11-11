@@ -21,11 +21,16 @@ func TestExecRunsInWorkThroughSrun(t *testing.T) {
 			t.Fatal(err)
 		}
 		write(t, filepath.Join(root, "src", "a.py"), "changed\n")
+		gitRun(t, root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "change")
+		commit, err = headCommit(root)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var out bytes.Buffer
 		if err := runExec(&out, root, "", []string{`echo "$P $GIT_COMMIT $GIT_DIRTY"; pwd; cat src/a.py`}); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		want := "pre " + commit + " 1\n" + filepath.Join(dir, "work") + "\nchanged\n"
+		want := "pre " + commit + " 0\n" + filepath.Join(dir, "work") + "\nchanged\n"
 		if out.String() != want {
 			t.Errorf("%s: output = %q, want %q", name, out.String(), want)
 		}

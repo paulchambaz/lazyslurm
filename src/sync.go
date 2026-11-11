@@ -35,9 +35,9 @@ func excluded(path string, patterns []string) bool {
 	return false
 }
 
-// fileSet lists the files under the push paths that git tracks or does not ignore.
+// fileSet lists the files under the push paths that git tracks.
 func fileSet(root string, cfg Config) ([]string, error) {
-	args := append([]string{"ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}, cfg.Push...)
+	args := append([]string{"ls-files", "-z", "--cached", "--"}, cfg.Push...)
 	c := command("git", args...)
 	c.Dir = root
 	out, err := c.Output()
@@ -121,6 +121,18 @@ func dirty(root string, cfg Config) (bool, error) {
 	return len(out) > 0, nil
 }
 
+// requireClean fails when the push paths hold changes or untracked files git does not ignore.
+func requireClean(root string, cfg Config) error {
+	isDirty, err := dirty(root, cfg)
+	if err != nil {
+		return err
+	}
+	if isDirty {
+		return errors.New("the tree under push is not clean: commit or stash first")
+	}
+	return nil
+}
+
 func prune(t Target, cfg Config, dir string, files []string) (int, error) {
 	work := quote(dir + "/work")
 	paths := quoteAll(cfg.Push)
@@ -187,7 +199,6 @@ type synced struct {
 	Commit  string
 	Sent    int
 	Removed int
-	Dirty   bool
 }
 
 // syncUp runs pre_push, sends the push set, snapshots HEAD when asked, then runs post_push.
@@ -196,11 +207,10 @@ func syncUp(w io.Writer, root string, cfg Config, snap bool) (synced, error) {
 	if err != nil {
 		return synced{}, err
 	}
-	isDirty, err := dirty(root, cfg)
-	if err != nil {
+	if err := requireClean(root, cfg); err != nil {
 		return synced{}, err
 	}
-	env := hookEnv(commit, isDirty)
+	env := hookEnv(commit, false)
 	if err := localHook(w, "pre_push", root, cfg.PrePush, env); err != nil {
 		return synced{}, err
 	}
@@ -212,7 +222,7 @@ func syncUp(w io.Writer, root string, cfg Config, snap bool) (synced, error) {
 	if err != nil {
 		return synced{}, err
 	}
-	s := synced{Dir: dir, Commit: commit, Dirty: isDirty}
+	s := synced{Dir: dir, Commit: commit}
 	s.Sent, s.Removed, err = push(root, cfg, dir)
 	if err == nil && snap {
 		err = snapshot(cfg.Target, dir, commit)

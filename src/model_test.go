@@ -84,20 +84,20 @@ func TestDetailTexts(t *testing.T) {
 
 func TestJobLineIsIdNameAndCounts(t *testing.T) {
 	m := testModel()
-	got := plain(m.jobLine(m.jobs[0], 30))
-	if utf8.RuneCountInString(got) != 30 || !strings.HasPrefix(got, "12  train.sh ") || !strings.HasSuffix(got, "  ●1") {
+	got := plain(m.jobLine(m.jobs[0], 30, 2, 7))
+	if utf8.RuneCountInString(got) != 30 || !strings.HasPrefix(got, "12  train.sh ") || !strings.HasSuffix(got, "  [1]    ") {
 		t.Errorf("running job line = %q", got)
 	}
 	m.states["11"] = jobState{States: map[string]int{"COMPLETED": 34, "FAILED": 1, "CANCELLED": 2}, Final: true}
-	line := m.jobLine(m.jobs[1], 30)
+	line := m.jobLine(m.jobs[1], 30, 2, 8)
 	got = plain(line)
-	if utf8.RuneCountInString(got) != 30 || !strings.HasPrefix(got, "11  eval.sh ") || !strings.HasSuffix(got, "  ✗1 ⊘2 ✓34") {
+	if utf8.RuneCountInString(got) != 30 || !strings.HasPrefix(got, "11  eval.sh ") || !strings.HasSuffix(got, "  [34/2/1]") {
 		t.Errorf("failed job line = %q", got)
 	}
-	if !strings.Contains(line, paint(red, "✗1")) || !strings.Contains(line, paint(green, "✓34")) {
+	if !strings.Contains(line, paint(red, "1")) || !strings.Contains(line, paint(green, "34")) {
 		t.Errorf("counts not colored: %q", line)
 	}
-	if got = plain(m.jobLine(Job{Job: "5", Script: "slurm/averylongscriptname.sh"}, 20)); got != "5  averyl...ame.sh  " {
+	if got = plain(m.jobLine(Job{Job: "5", Script: "slurm/averylongscriptname.sh"}, 20, 1, 0)); got != "5  averyl...ame.sh  " {
 		t.Errorf("long name line = %q", got)
 	}
 }

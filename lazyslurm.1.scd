@@ -22,9 +22,10 @@ Without a command, the UI opens. See *THE UI*.
 # COMMANDS
 
 *push*
-	Send the tracked and untracked, not ignored, files under the *push* paths
-	to *work/* on the target, and remove from it the files no longer in the
-	set. Local changes are sent. Files that did not change are not sent again.
+	Send the tracked files under the *push* paths to *work/* on the target, and
+	remove from it the files no longer in the set. Refused when the tree under
+	the *push* paths is not clean, untracked files included, so *work/* always
+	holds a commit. Files that did not change are not sent again.
 	Runs the *pre_push* hook locally before, and *post_push* on the target
 	after, in *work/*.
 
@@ -78,7 +79,7 @@ Without a command, the UI opens. See *THE UI*.
 	is followed until interrupted; the job must have started.
 
 *exec* [*--*] _COMMAND_...
-	Send the files like *push*, then run _COMMAND_ in *work/* through *srun*
+	Send the files like *push* (same clean tree rule), then run _COMMAND_ in *work/* through *srun*
 	with the *srun* options of the host, after the *prelude*. One argument is
 	a shell command line, several are quoted one by one. Refused without a
 	*srun* key. The exit status is the command's. Not journaled, not
@@ -100,12 +101,13 @@ Three panels on the left: *1* Hosts, *2* Jobs of the selected host, newest
 first, and *3* Snapshots. The main view shows the selection; the log panel
 shows the results of the tasks, the output of hooks and the errors, and no
 command lines. A job line reads the job id, the name of its script, and its
-task counts at the right, each with a mark: a green check (completed), a red
-cross (failed), a cyan dot (running), a yellow circle (waiting), a magenta
-slash (cancelled). While a task runs, its name and an animated dot appear at
-the bottom left, before the keys. The UI calls the same functions as the
-commands above, one task at a time, in the background. It refreshes every 120
-seconds with a single command on the cluster.
+task counts at the right between brackets and separated by slashes, in this
+order: running (cyan), waiting (yellow), completed (green), cancelled
+(magenta) and failed (red). Counts that are zero are left out. While a task
+runs, its name and an animated dot appear at the bottom left, before the keys.
+The UI calls the same functions as the commands above, one task at a time, in
+the background. It refreshes every 120 seconds with a single command on the
+cluster.
 
 *1* *2* *3*, *[* *]*, *tab*
 	Go to a panel.
