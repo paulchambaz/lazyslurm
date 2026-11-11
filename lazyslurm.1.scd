@@ -48,7 +48,7 @@ Without a command, the UI opens. See *THE UI*.
 	hosts. A job shown in a final state is marked as seen and hidden next time
 	unless *--all* is given.
 
-*pull*
+*pull* [_JOB_]
 	Run *pre_pull* on the target in *work/*, bring back the *pull* paths from
 	*keep/* into the repository (nothing is deleted locally, missing paths are
 	skipped), copy the _slurm-\*.out_ and _slurm-\*.err_ files of the snapshots
@@ -59,6 +59,9 @@ Without a command, the UI opens. See *THE UI*.
 	file that is not in the commit, not under a *keep* path, not matched by
 	*exclude* and not a collected log). A snapshot kept for stray files is
 	reported. If *sacct* or *squeue* fails, nothing is deleted.
+	With _JOB_, a job of the journal of the host, nothing changes except that
+	*pre_pull* and *post_pull* see its id in *LAZYSLURM_JOB*, so that a hook can
+	look at one job, for example a finished one.
 
 *retry* [_JOB_]
 	Resubmit the failed tasks of _JOB_, or of the newest job of the host. A
@@ -120,7 +123,8 @@ first, and *2* Snapshots. The main view *3* shows the selection; the log
 panel *4*
 shows the results of the tasks, the output of hooks and the errors, and no
 command lines. A job line reads the job id, the name of its script, and its
-task counts at the right between brackets and separated by slashes, in this
+task counts, right-aligned in a column that follows the longest script name,
+between brackets and separated by slashes, in this
 order: running (cyan), waiting (yellow), completed (green), cancelled
 (magenta) and failed (red). Counts that are zero are left out. While a task
 runs, its name and an animated dot appear at the bottom left, before the keys.
@@ -152,7 +156,9 @@ right column.
 	Refresh now.
 
 *P* *p*
-	Push, pull.
+	Push, pull. In the Jobs panel, *p* pulls for the selected job: the hooks
+	of the pull see its id in *LAZYSLURM_JOB*, and everything is pulled all the
+	same.
 
 *s*
 	Submit. A picker lists the files that match *scripts*, the most recently

@@ -31,7 +31,7 @@ commands:
   exec [--] COMMAND...  run COMMAND in work/ on a short allocation
   logs [-f] [--err] JOB[_TASK]
                         print the stdout of a job, or its stderr
-  pull                  fetch the pull paths and the snapshot logs, then
+  pull [JOB]            fetch the pull paths and the snapshot logs, then
                         delete the snapshots that are done
   push                  send the push set to work/ on the target
   retry [JOB]           resubmit the failed tasks of a job

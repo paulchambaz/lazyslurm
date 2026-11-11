@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jesseduffield/gocui"
 )
@@ -739,5 +740,64 @@ func TestATaskTellsHooksTheWidthOfTheLog(t *testing.T) {
 	log, _ := u.g.View(logView)
 	if hookColumns != log.InnerWidth()-1 || hookColumns < 20 {
 		t.Errorf("hookColumns = %d, log inner width %d", hookColumns, log.InnerWidth())
+	}
+}
+
+func TestPullFromTheJobsPanelPullsForTheSelectedJob(t *testing.T) {
+	setupFakeSlurm(t)
+	root := scriptRepo(t, "post_pull = 'echo \"[$LAZYSLURM_JOB]\" > post_job'\n")
+	if _, err := submit(root, "slurm/run.sh"); err != nil {
+		t.Fatal(err)
+	}
+	u := newTestTUI(t, root)
+	u.start("refresh", nil, nil)
+	u.settle(t)
+	saw := func() string {
+		u.settle(t)
+		got, _ := os.ReadFile(filepath.Join(root, "post_job"))
+		return string(got)
+	}
+	u.focusOn(jobsPanel)
+	u.pull()
+	if got := saw(); got != "[100]\n" {
+		t.Errorf("from the jobs panel: %q", got)
+	}
+	for name, focus := range map[string]func() error{
+		"hosts": func() error { return u.focusOn(hostsPanel) },
+		"snaps": func() error { return u.focusOn(snapsPanel) },
+		"main":  func() error { u.focusOn(jobsPanel); return u.focusMain() },
+		"log":   func() error { u.focusOn(jobsPanel); return u.focusLog() },
+	} {
+		focus()
+		u.pull()
+		if got := saw(); got != "[]\n" {
+			t.Errorf("from %s: %q", name, got)
+		}
+		u.focusOn(jobsPanel)
+		u.pull()
+		saw()
+	}
+}
+
+func TestListsHaveNoMargin(t *testing.T) {
+	setupFakeSlurm(t)
+	root := scriptRepo(t, "")
+	if _, err := submit(root, "slurm/run.sh"); err != nil {
+		t.Fatal(err)
+	}
+	u := newTestTUI(t, root)
+	u.start("refresh", nil, nil)
+	u.settle(t)
+	jobs, _ := u.g.View("jobs")
+	hosts, _ := u.g.View("hosts")
+	snaps, _ := u.g.View("snaps")
+	line := strings.TrimRight(jobs.Buffer(), "\n")
+	if !strings.HasPrefix(line, "100") || utf8.RuneCountInString(plainText(line)) != jobs.InnerWidth() {
+		t.Errorf("job line %q is not flush with both borders (inner width %d)", line, jobs.InnerWidth())
+	}
+	for name, v := range map[string]*gocui.View{"hosts": hosts, "snaps": snaps} {
+		if strings.TrimSpace(v.Buffer()) == "" || strings.HasPrefix(v.Buffer(), " ") {
+			t.Errorf("%s is empty or starts with a margin: %q", name, v.Buffer())
+		}
 	}
 }

@@ -54,26 +54,48 @@ func pullLogs(root string, t Target, dir string) error {
 
 type pullRow struct {
 	Host    string `json:"host"`
+	Job     string `json:"job,omitempty"`
 	Paths   int    `json:"paths"`
 	Dropped int    `json:"dropped"`
 }
 
+// jobEnv names the variable that tells the pull hooks which job the user pulled for.
+const jobEnv = "LAZYSLURM_JOB"
+
 func runPull(w io.Writer, root, hostFlag string, asJSON bool, args []string) error {
-	if len(args) > 0 {
-		return usageError("pull takes no arguments")
+	if len(args) > 1 {
+		return usageError("pull takes at most one job")
 	}
 	cfg, err := loadConfig(root, hostFlag)
 	if err != nil {
 		return err
 	}
-	n, dropped, err := pullFrom(hookOut, root, cfg)
+	job := ""
+	if len(args) == 1 {
+		jobs, err := readJournal(root)
+		if err != nil {
+			return err
+		}
+		j, found, err := findJob(jobs, cfg.Host, args[0])
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("job %s is not in the journal of %s", args[0], cfg.Host)
+		}
+		job = j.Job
+	}
+	n, dropped, err := pullFrom(hookOut, root, cfg, job)
 	if err != nil {
 		return fmt.Errorf("pull from %s: %w", cfg.Host, err)
 	}
 	if asJSON {
-		return json.NewEncoder(w).Encode(pullRow{cfg.Host, n, dropped})
+		return json.NewEncoder(w).Encode(pullRow{cfg.Host, job, n, dropped})
 	}
 	line := fmt.Sprintf("pulled %d paths from %s", n, cfg.Host)
+	if job != "" {
+		line += " for job " + job
+	}
 	if dropped > 0 {
 		line += fmt.Sprintf(", dropped %d snapshots", dropped)
 	}
@@ -82,7 +104,8 @@ func runPull(w io.Writer, root, hostFlag string, asJSON bool, args []string) err
 }
 
 // pullFrom judges the snapshots, runs pre_pull, fetches paths and logs, runs post_pull, then drops the final snapshots.
-func pullFrom(hooks io.Writer, root string, cfg Config) (paths, dropped int, err error) {
+// A job id is only given to the hooks, in LAZYSLURM_JOB; everything is pulled all the same.
+func pullFrom(hooks io.Writer, root string, cfg Config, job string) (paths, dropped int, err error) {
 	commit, err := headCommit(root)
 	if err != nil {
 		return 0, 0, err
@@ -92,6 +115,9 @@ func pullFrom(hooks io.Writer, root string, cfg Config) (paths, dropped int, err
 		return 0, 0, err
 	}
 	env := hookEnv(commit, isDirty, cfg.Host)
+	if job != "" {
+		env = append(env, jobEnv+"="+job)
+	}
 	dir, err := cfg.Target.resolve()
 	if err != nil {
 		return 0, 0, err

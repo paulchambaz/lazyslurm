@@ -79,10 +79,55 @@ func TestFailingPrePullPullsNothing(t *testing.T) {
 	}
 }
 
-func TestPullTakesNoArguments(t *testing.T) {
-	root := jobRepo(t, testTargets(t)["local"], "")
-	if err := runPull(&bytes.Buffer{}, root, "", false, []string{"x"}); err == nil {
-		t.Error("pull x must fail")
+func TestPullTakesAtMostOneKnownJob(t *testing.T) {
+	setupFakeSlurm(t)
+	root := jobRepo(t, testTargets(t)["local"], "post_pull = 'touch post_ran'\n")
+	if err := runPull(&bytes.Buffer{}, root, "", false, []string{"1", "2"}); err == nil {
+		t.Error("pull 1 2 must fail")
+	}
+	err := runPull(&bytes.Buffer{}, root, "", false, []string{"999"})
+	if err == nil || !strings.Contains(err.Error(), "not in the journal") || exists(filepath.Join(root, "post_ran")) {
+		t.Errorf("pull of an unknown job: %v", err)
+	}
+}
+
+func TestPullForAJobTellsTheHooksItsId(t *testing.T) {
+	for name, tg := range testTargets(t) {
+		setupFakeSlurm(t)
+		root := jobRepo(t, tg, "pre_pull = 'echo \"[$LAZYSLURM_JOB]\" > pre_job'\npost_pull = 'echo \"[$LAZYSLURM_JOB]\" > post_job'\n")
+		if _, err := submit(root, "slurm/run.sh"); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		dir, err := tg.resolve()
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(dir, "keep", "outputs", "logs", "a.txt"), "log\n")
+		for _, args := range [][]string{{"100"}, {"100_3"}} {
+			var out bytes.Buffer
+			if err := runPull(&out, root, "", false, args); err != nil || out.String() != "pulled 1 paths from h for job 100\n" {
+				t.Fatalf("%s %v: %q, %v", name, args, out.String(), err)
+			}
+			if got, _ := os.ReadFile(filepath.Join(root, "post_job")); string(got) != "[100]\n" {
+				t.Errorf("%s %v: post_pull saw %q", name, args, got)
+			}
+			if got, _ := os.ReadFile(filepath.Join(dir, "work", "pre_job")); string(got) != "[100]\n" {
+				t.Errorf("%s %v: pre_pull saw %q", name, args, got)
+			}
+			if !exists(filepath.Join(root, "outputs", "logs", "a.txt")) {
+				t.Errorf("%s %v: the pull did not fetch everything", name, args)
+			}
+		}
+		if _, err := pull(root); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(root, "post_job")); string(got) != "[]\n" {
+			t.Errorf("%s: a pull without a job gave post_pull %q", name, got)
+		}
+		var out bytes.Buffer
+		if err := runPull(&out, root, "", true, []string{"100"}); err != nil || out.String() != `{"host":"h","job":"100","paths":1,"dropped":0}`+"\n" {
+			t.Errorf("%s: json = %q, %v", name, out.String(), err)
+		}
 	}
 }
 

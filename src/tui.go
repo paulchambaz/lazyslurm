@@ -464,7 +464,11 @@ func (u *tui) push() error {
 
 func (u *tui) pull() error {
 	root, host := u.m.root, u.m.host
-	u.verb("pull", func(w io.Writer) error { return runPull(w, root, host, false, nil) })
+	var args []string
+	if j, ok := u.m.job(); ok && u.m.focus == jobsPanel && !u.inMain && !u.inLog {
+		args = []string{j.Job}
+	}
+	u.verb("pull", func(w io.Writer) error { return runPull(w, root, host, false, args) })
 	return nil
 }
 
@@ -955,7 +959,7 @@ func place(g *gocui.Gui, name string, x0, y0, x1, y1 int) (v *gocui.View, create
 func showList(v *gocui.View, lines []string, sel int) {
 	v.Clear()
 	for _, l := range lines {
-		fmt.Fprintln(v, " "+l)
+		fmt.Fprintln(v, l)
 	}
 	v.Highlight = len(lines) > 0
 	v.SelBgColor = gocui.ColorBlue
@@ -1066,7 +1070,7 @@ func (u *tui) layout(g *gocui.Gui) error {
 		lines := m.hostLines()
 		switch p {
 		case jobsPanel:
-			lines = m.jobLines(v.InnerWidth() - 2)
+			lines = m.jobLines(v.InnerWidth())
 		case snapsPanel:
 			lines = m.snapLines()
 		}
