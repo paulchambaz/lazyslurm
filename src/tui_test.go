@@ -106,9 +106,43 @@ func TestRefreshShowsJobsAndSnapshotsAndKeysMove(t *testing.T) {
 	if u.m.focus != snapsPanel {
 		t.Errorf("focus = %d", u.m.focus)
 	}
+}
+
+func TestCycleVisitsEveryStopAndWraps(t *testing.T) {
+	setupFakeSlurm(t)
+	u := newTestTUI(t, scriptRepo(t, ""))
+	where := func() string {
+		switch {
+		case u.inLog:
+			return "log"
+		case u.inMain:
+			return "main"
+		}
+		return panelViews[u.m.focus]
+	}
+	if where() != "jobs" {
+		t.Fatalf("starts on %s, want jobs", where())
+	}
+	for i, want := range []string{"snaps", "main", "log", "hosts", "jobs"} {
+		u.cycle(1)
+		if got := where(); got != want {
+			t.Errorf("forward %d: %s, want %s", i, got, want)
+		}
+	}
+	for i, want := range []string{"hosts", "log", "main", "snaps", "jobs"} {
+		u.cycle(-1)
+		if got := where(); got != want {
+			t.Errorf("backward %d: %s, want %s", i, got, want)
+		}
+	}
+	u.focusMain()
 	u.cycle(1)
-	if u.m.focus != hostsPanel {
-		t.Errorf("focus = %d, want a wrap to hosts", u.m.focus)
+	if where() != "log" || u.m.focus != jobsPanel {
+		t.Errorf("main to log: %s, focus %d", where(), u.m.focus)
+	}
+	u.back()
+	if where() != "jobs" {
+		t.Errorf("esc from the log goes to %s, want the panel it came from", where())
 	}
 }
 
@@ -335,7 +369,7 @@ func TestMainViewTakesTheFocusAndScrolls(t *testing.T) {
 	u.m.logs["7"] = strings.Repeat("line\n", 80)
 	u.settle(t)
 	main, _ := u.g.View(mainView)
-	if main.Title != "[0]-Job 7" {
+	if main.Title != "[3]-Job 7" {
 		t.Errorf("title = %q", main.Title)
 	}
 	u.focusMain()
@@ -624,5 +658,40 @@ func TestOnlyTheFocusedPanelShowsItsCursor(t *testing.T) {
 		if on {
 			t.Errorf("panel %d shows a cursor while the main view has the focus", i)
 		}
+	}
+}
+
+func TestLogHasItsNumberAndTheHelpListsIt(t *testing.T) {
+	setupFakeSlurm(t)
+	u := newTestTUI(t, scriptRepo(t, ""))
+	u.settle(t)
+	if v, err := u.g.View(logView); err != nil || v.Title != "[4]-Log" {
+		t.Errorf("log view = %v, %v", v, err)
+	}
+	if !strings.Contains(helpText, " 4 ") || !strings.Contains(helpText, "the log") {
+		t.Errorf("the help does not list the key of the log: %q", helpText)
+	}
+}
+
+func TestLogGrowsToTwoThirdsWhileItHasTheFocus(t *testing.T) {
+	setupFakeSlurm(t)
+	u := newTestTUI(t, scriptRepo(t, ""))
+	u.settle(t)
+	log, _ := u.g.View(logView)
+	main, _ := u.g.View(mainView)
+	_, h := u.g.Size()
+	rows := h - 1
+	if log.Height() != rows-rows*2/3 || log.Height() >= main.Height() {
+		t.Errorf("unfocused: log %d rows, main %d", log.Height(), main.Height())
+	}
+	u.focusLog()
+	u.settle(t)
+	if log.Height() != rows-rows/3 || log.Height() <= main.Height() {
+		t.Errorf("focused: log %d rows, main %d", log.Height(), main.Height())
+	}
+	u.back()
+	u.settle(t)
+	if log.Height() != rows-rows*2/3 {
+		t.Errorf("after esc: log %d rows", log.Height())
 	}
 }

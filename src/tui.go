@@ -43,12 +43,13 @@ var taskNames = map[string]string{
 
 var panelViews = [panelCount]string{"hosts", "jobs", "snaps"}
 
-var panelTitles = [panelCount]string{"[1]-Hosts", "[2]-Jobs", "[3]-Snapshots"}
+var panelTitles = [panelCount]string{"[0]-Hosts", "[1]-Jobs", "[2]-Snapshots"}
 
-const helpText = ` 1 2 3  [ ]  tab   go to a panel
+const helpText = ` 0 1 2 3 4         go to hosts, jobs, snapshots, the main view or the log
+ [ ]  tab          go to the previous or next one, all around
  j k  arrows       move
  enter             select a host, or read the log of a job
- 0                 go to the main view, to scroll it with j k (esc to leave)
+ 3 4               in the main view or the log, j k scroll it (esc to leave)
  J K               scroll the main view
  /                 filter the jobs
  R                 refresh now
@@ -373,8 +374,28 @@ func (u *tui) back() error {
 	return nil
 }
 
+const (
+	mainStop = int(panelCount)
+	logStop  = int(panelCount) + 1
+	stops    = int(panelCount) + 2
+)
+
 func (u *tui) cycle(delta int) error {
-	return u.focusOn((u.m.focus + panel(delta) + panelCount) % panelCount)
+	at := int(u.m.focus)
+	switch {
+	case u.inLog:
+		at = logStop
+	case u.inMain:
+		at = mainStop
+	}
+	switch next := (at + delta + stops) % stops; next {
+	case logStop:
+		return u.focusLog()
+	case mainStop:
+		return u.focusMain()
+	default:
+		return u.focusOn(panel(next))
+	}
 }
 
 func (u *tui) move(delta int) error {
@@ -634,9 +655,11 @@ func (u *tui) bind() error {
 		key any
 		fn  func() error
 	}{
-		{'1', func() error { return u.focusOn(hostsPanel) }},
-		{'2', func() error { return u.focusOn(jobsPanel) }},
-		{'3', func() error { return u.focusOn(snapsPanel) }},
+		{'0', func() error { return u.focusOn(hostsPanel) }},
+		{'1', func() error { return u.focusOn(jobsPanel) }},
+		{'2', func() error { return u.focusOn(snapsPanel) }},
+		{'3', u.focusMain},
+		{'4', u.focusLog},
 		{'[', func() error { return u.cycle(-1) }},
 		{']', func() error { return u.cycle(1) }},
 		{gocui.KeyTab, func() error { return u.cycle(1) }},
@@ -657,7 +680,6 @@ func (u *tui) bind() error {
 		{'r', u.retry},
 		{'c', u.cancel},
 		{'L', u.logsOf},
-		{'0', u.focusMain},
 		{gocui.KeyEsc, u.back},
 		{'d', u.drop},
 		{'C', u.clean},
@@ -1024,6 +1046,9 @@ func (u *tui) layout(g *gocui.Gui) error {
 		jobsEnd = hostsEnd + free/3
 	}
 	mainEnd := rows * 2 / 3
+	if u.inLog {
+		mainEnd = max(rows/3, 3)
+	}
 	g.Highlight, g.SelFrameColor = true, gocui.ColorGreen|gocui.AttrBold
 	spans := [panelCount][2]int{{0, hostsEnd - 1}, {hostsEnd, jobsEnd - 1}, {jobsEnd, rows - 1}}
 	for p := range panelCount {
@@ -1050,7 +1075,7 @@ func (u *tui) layout(g *gocui.Gui) error {
 		return err
 	}
 	title, text := m.detail()
-	v.Title = "[0]-" + title
+	v.Title = "[3]-" + title
 	v.Clear()
 	fmt.Fprint(v, " "+strings.ReplaceAll(text, "\n", "\n "))
 	u.scroll = min(u.scroll, max(0, strings.Count(text, "\n")+1-v.InnerHeight()))
@@ -1059,7 +1084,7 @@ func (u *tui) layout(g *gocui.Gui) error {
 	if err != nil {
 		return err
 	}
-	v.Title = "Log"
+	v.Title = "[4]-Log"
 	v.Clear()
 	wrapped := wrapLog(u.log.tail(logTail), v.InnerWidth()-1)
 	u.logUp = min(u.logUp, max(0, len(wrapped)-v.InnerHeight()))

@@ -115,8 +115,9 @@ Without a command, the UI opens. See *THE UI*.
 
 # THE UI
 
-Three panels on the left: *1* Hosts, *2* Jobs of the selected host, newest
-first, and *3* Snapshots. The main view shows the selection; the log panel
+Three panels on the left: *0* Hosts, *1* Jobs of the selected host, newest
+first, and *2* Snapshots. The main view *3* shows the selection; the log
+panel *4*
 shows the results of the tasks, the output of hooks and the errors, and no
 command lines. A job line reads the job id, the name of its script, and its
 task counts at the right between brackets and separated by slashes, in this
@@ -127,15 +128,18 @@ The UI calls the same functions as the commands above, one task at a time, in
 the background. It refreshes every 120 seconds with a single command on the
 cluster.
 
-*1* *2* *3*, *[* *]*, *tab*
-	Go to a panel.
+*0* *1* *2* *3* *4*
+	Go to the hosts, the jobs, the snapshots, the main view or the log.
+
+*[* *]*, *tab*
+	Go to the previous or the next one of these five, all around.
 
 *j* *k*, arrows
 	Move. *J* and *K* scroll the main view.
 
-*0*
-	Go to the main view, to scroll it with *j* and *k*. *esc* or a panel key
-	leaves it.
+In the main view and in the log, *j* and *k* scroll it. *esc* or a panel
+key leaves it. While the log has the focus it grows to two thirds of the
+right column.
 
 *enter*
 	On a host, select it. On a job, read its log.
