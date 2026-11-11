@@ -36,6 +36,8 @@ func statusRepo(t *testing.T) string {
 		`{"v":3,"time":"t3","host":"pfcalcul","job":"3","script":"c.sh","commit":"abcdef0123456789"}`,
 	}, "\n")+"\n")
 	write(t, seenPath(root), "pfcalcul 1\n")
+	setupFakeSSH(t)
+	setupFakeSlurm(t)
 	return root
 }
 
@@ -78,7 +80,7 @@ func TestStatusWithoutSelectedHostListsAllHosts(t *testing.T) {
 func TestStatusJSON(t *testing.T) {
 	t.Setenv("CLUSTER", "")
 	root := statusRepo(t)
-	want := `{"host":"pfcalcul","job":"3","time":"t3","script":"c.sh","commit":"abcdef0123456789","note":""}` + "\n"
+	want := `{"host":"pfcalcul","job":"3","time":"t3","script":"c.sh","commit":"abcdef0123456789","note":"","final":false}` + "\n"
 	if got := status(t, root, "", false, true); got != want {
 		t.Errorf("got %q", got)
 	}
@@ -99,5 +101,46 @@ func TestStatusUsageAndConfigErrors(t *testing.T) {
 	}
 	if err := runStatus(&bytes.Buffer{}, root, "", false, false, nil); err == nil {
 		t.Error("missing config must fail")
+	}
+}
+
+func TestStatusShowsStatesAndMarksFinalJobsSeenOnce(t *testing.T) {
+	t.Setenv("CLUSTER", "")
+	root := statusRepo(t)
+	fake := os.Getenv("FAKE_SLURM")
+	write(t, filepath.Join(fake, "sacct"), "3_1|COMPLETED\n3_2|COMPLETED\n3_3|RUNNING\n")
+	if got := status(t, root, "", false, false); got != "3  t3  c.sh  abcdef01  2 COMPLETED  1 RUNNING\n" {
+		t.Errorf("running = %q", got)
+	}
+	want := `{"host":"pfcalcul","job":"3","time":"t3","script":"c.sh","commit":"abcdef0123456789","note":"","states":{"COMPLETED":2,"RUNNING":1},"final":false}` + "\n"
+	if got := status(t, root, "", false, true); got != want {
+		t.Errorf("json = %q", got)
+	}
+	if seen, _ := readSeen(root); seen["pfcalcul 3"] {
+		t.Error("a running job was marked seen")
+	}
+	write(t, filepath.Join(fake, "sacct"), "3_1|COMPLETED\n3_2|FAILED\n3_3|CANCELLED by 1\n")
+	if got := status(t, root, "", false, false); got != "3  t3  c.sh  abcdef01  1 CANCELLED  1 COMPLETED  1 FAILED\n" {
+		t.Errorf("final = %q", got)
+	}
+	if got := status(t, root, "", false, false); got != "" {
+		t.Errorf("a seen job was listed again: %q", got)
+	}
+	status(t, root, "", true, false)
+	data, err := os.ReadFile(seenPath(root))
+	if err != nil || strings.Count(string(data), "pfcalcul 3") != 1 {
+		t.Errorf("seen = %q, %v", data, err)
+	}
+}
+
+func TestStatusFailsWhenSlurmDoes(t *testing.T) {
+	t.Setenv("CLUSTER", "")
+	root := statusRepo(t)
+	write(t, filepath.Join(os.Getenv("FAKE_SLURM"), "fail"), "")
+	if err := runStatus(&bytes.Buffer{}, root, "", false, false, nil); err == nil || !strings.Contains(err.Error(), "sacct") {
+		t.Errorf("err = %v", err)
+	}
+	if seen, _ := readSeen(root); seen["pfcalcul 3"] {
+		t.Error("nothing may be marked seen on failure")
 	}
 }

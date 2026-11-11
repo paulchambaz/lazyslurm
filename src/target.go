@@ -27,6 +27,13 @@ func (t Target) cmd(script string) (*exec.Cmd, string) {
 	return command("ssh", "-o", "BatchMode=yes", t.Alias, "bash -c "+quote(script)), "ssh " + t.Alias
 }
 
+func (t Target) path(p string) string {
+	if t.Alias != "" {
+		return t.Alias + ":" + p
+	}
+	return p
+}
+
 func (t Target) run(script string, stdin io.Reader) ([]byte, error) {
 	c, name := t.cmd(script)
 	var out, errOut bytes.Buffer

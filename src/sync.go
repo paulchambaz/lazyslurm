@@ -87,18 +87,38 @@ func prepareScript(cfg Config, dir string) string {
 	return b.String()
 }
 
-func send(root string, t Target, dir string, files []string) error {
-	dest := dir + "/work/"
-	if t.Alias != "" {
-		dest = t.Alias + ":" + dest
-	}
-	c := command("rsync", "-a", "-0", "--files-from=-", "-e", "ssh -o BatchMode=yes", root+"/", dest)
+func rsync(stdin io.Reader, args ...string) error {
+	c := command("rsync", append([]string{"-e", "ssh -o BatchMode=yes"}, args...)...)
 	var errOut bytes.Buffer
-	c.Stdin, c.Stderr = nulJoin(files), &errOut
+	c.Stdin, c.Stderr = stdin, &errOut
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("rsync: %w: %s", err, strings.TrimSpace(errOut.String()))
 	}
 	return nil
+}
+
+func send(root string, t Target, dir string, files []string) error {
+	return rsync(nulJoin(files), "-a", "-0", "--files-from=-", root+"/", t.path(dir+"/work/"))
+}
+
+func headCommit(root string) (string, error) {
+	c := command("git", "rev-parse", "--verify", "HEAD")
+	c.Dir = root
+	out, err := c.Output()
+	if err != nil {
+		return "", errors.New("no commits yet")
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func dirty(root string, cfg Config) (bool, error) {
+	c := command("git", append([]string{"status", "--porcelain", "--"}, cfg.Push...)...)
+	c.Dir = root
+	out, err := c.Output()
+	if err != nil {
+		return false, fmt.Errorf("git status: %w", err)
+	}
+	return len(out) > 0, nil
 }
 
 func prune(t Target, cfg Config, dir string, files []string) (int, error) {
@@ -162,6 +182,56 @@ func snapshot(t Target, dir, commit string) error {
 	return nil
 }
 
+type synced struct {
+	Dir     string
+	Commit  string
+	Sent    int
+	Removed int
+}
+
+// syncUp runs pre_push, sends the push set, snapshots HEAD when asked, then runs post_push.
+func syncUp(w io.Writer, root string, cfg Config, snap bool) (synced, error) {
+	commit, err := headCommit(root)
+	if err != nil {
+		return synced{}, err
+	}
+	isDirty, err := dirty(root, cfg)
+	if err != nil {
+		return synced{}, err
+	}
+	env := hookEnv(commit, isDirty)
+	if err := localHook(w, "pre_push", root, cfg.PrePush, env); err != nil {
+		return synced{}, err
+	}
+	dir, err := cfg.Target.resolve()
+	if err != nil {
+		return synced{}, err
+	}
+	unlock, err := cfg.Target.lock(dir)
+	if err != nil {
+		return synced{}, err
+	}
+	s := synced{Dir: dir, Commit: commit}
+	s.Sent, s.Removed, err = push(root, cfg, dir)
+	if err == nil && snap {
+		err = snapshot(cfg.Target, dir, commit)
+	}
+	if unlockErr := unlock(); err == nil {
+		err = unlockErr
+	}
+	if err != nil {
+		return synced{}, err
+	}
+	hookDir := dir + "/work"
+	if snap {
+		hookDir = dir + "/" + commit
+	}
+	if err := targetHook(w, "post_push", cfg.Target, hookDir, cfg.PostPush, env); err != nil {
+		return synced{}, err
+	}
+	return s, nil
+}
+
 type pushRow struct {
 	Host    string `json:"host"`
 	Files   int    `json:"files"`
@@ -176,24 +246,13 @@ func runPush(w io.Writer, root, hostFlag string, asJSON bool, args []string) err
 	if err != nil {
 		return err
 	}
-	dir, err := cfg.Target.resolve()
-	if err != nil {
-		return err
-	}
-	unlock, err := cfg.Target.lock(dir)
-	if err != nil {
-		return err
-	}
-	sent, removed, err := push(root, cfg, dir)
-	if unlockErr := unlock(); err == nil {
-		err = unlockErr
-	}
+	s, err := syncUp(os.Stderr, root, cfg, false)
 	if err != nil {
 		return fmt.Errorf("push to %s: %w", cfg.Host, err)
 	}
 	if asJSON {
-		return json.NewEncoder(w).Encode(pushRow{cfg.Host, sent, removed})
+		return json.NewEncoder(w).Encode(pushRow{cfg.Host, s.Sent, s.Removed})
 	}
-	_, err = fmt.Fprintf(w, "pushed %d files to %s (%d removed)\n", sent, cfg.Host, removed)
+	_, err = fmt.Fprintf(w, "pushed %d files to %s (%d removed)\n", s.Sent, cfg.Host, s.Removed)
 	return err
 }

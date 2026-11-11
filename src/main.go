@@ -22,15 +22,18 @@ A terminal UI for Slurm clusters, opened from a repo. Without a command it
 opens the UI.
 
 commands:
+  pull                  fetch the pull paths and the snapshot logs
   push                  send the push set to work/ on the target
-  status [--all] [JOB]  list the jobs of the journal
+  status [--all] [JOB]  list the jobs of the journal with their states
+  submit [--sbatch OPTS] [--note TEXT] SCRIPT [ARGS...]
+                        snapshot HEAD and submit SCRIPT with sbatch
 
 options:
   -h        print this help and exit
   -V        print the version and exit
   -H HOST   use this host of .slurm.toml, instead of CLUSTER or the default
   --json    print JSON Lines
-  --yes     do not ask for confirmation
+  --yes     do not ask for confirmation (without it, submit exits 3)
 `
 
 type usageError string
@@ -46,6 +49,9 @@ func main() {
 	if _, ok := errors.AsType[usageError](err); ok {
 		os.Exit(2)
 	}
+	if _, ok := errors.AsType[confirmError](err); ok {
+		os.Exit(3)
+	}
 	os.Exit(1)
 }
 
@@ -56,7 +62,9 @@ func run(args []string) error {
 	showVersion := fs.Bool("V", false, "")
 	hostFlag := fs.String("H", "", "")
 	asJSON := fs.Bool("json", false, "")
-	fs.Bool("yes", false, "")
+	yes := fs.Bool("yes", false, "")
+	sbatchFlag := fs.String("sbatch", "", "")
+	note := fs.String("note", "", "")
 	all := fs.Bool("all", false, "")
 	if err := fs.Parse(args); err != nil {
 		return usageError(err.Error())
@@ -92,6 +100,18 @@ func run(args []string) error {
 			return err
 		}
 		return runPush(os.Stdout, root, *hostFlag, *asJSON, rest)
+	case "pull":
+		root, err := repoRoot()
+		if err != nil {
+			return err
+		}
+		return runPull(os.Stdout, root, *hostFlag, *asJSON, rest)
+	case "submit":
+		root, err := repoRoot()
+		if err != nil {
+			return err
+		}
+		return runSubmit(os.Stdout, root, *hostFlag, *yes, *asJSON, *sbatchFlag, *note, rest)
 	}
 	return usageError(fmt.Sprintf("unknown command %q", command))
 }

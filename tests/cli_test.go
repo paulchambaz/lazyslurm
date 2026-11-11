@@ -56,6 +56,34 @@ func repo(t *testing.T) string {
 	return dir
 }
 
+func commitAll(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func fakeSlurm(t *testing.T) string {
+	t.Helper()
+	bin, state := t.TempDir(), t.TempDir()
+	scripts := map[string]string{
+		"sbatch": "#!/bin/sh\nn=$(cat \"$FAKE_SLURM/next\" 2>/dev/null || echo 100)\necho $((n + 1)) > \"$FAKE_SLURM/next\"\necho \"$n\"\n",
+		"sacct":  "#!/bin/sh\ncat \"$FAKE_SLURM/sacct\" 2>/dev/null\nexit 0\n",
+		"squeue": "#!/bin/sh\nexit 0\n",
+	}
+	for name, body := range scripts {
+		write(t, filepath.Join(bin, name), body)
+		if err := os.Chmod(filepath.Join(bin, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	t.Setenv("FAKE_SLURM", state)
+	return state
+}
+
 func write(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -98,6 +126,7 @@ func TestUnknownCommandExitsWithUsageCode(t *testing.T) {
 }
 
 func TestStatusListsTheJournal(t *testing.T) {
+	fakeSlurm(t)
 	dir := repo(t)
 	write(t, filepath.Join(dir, ".slurm.toml"), `
 [default]
@@ -145,6 +174,7 @@ func pushRepo(t *testing.T) (dir, target string) {
 	dir, target = repo(t), filepath.Join(t.TempDir(), "target")
 	write(t, filepath.Join(dir, ".slurm.toml"), "[default]\npush = [\"src\"]\n[hosts.a]\ntarget = \""+target+"\"\n")
 	write(t, filepath.Join(dir, "src", "a.py"), "a\n")
+	commitAll(t, dir)
 	return dir, target
 }
 
@@ -173,5 +203,51 @@ func TestPushErrors(t *testing.T) {
 	}
 	if _, stderr, code := lazyslurm(t, repo(t), "push"); code != 1 || !strings.Contains(stderr, ".slurm.toml") {
 		t.Errorf("no config: exit %d, stderr %q", code, stderr)
+	}
+}
+
+func TestSubmitStatusAndPullEndToEnd(t *testing.T) {
+	fake := fakeSlurm(t)
+	dir, target := pushRepo(t)
+	write(t, filepath.Join(dir, "src", "run.sh"), "#!/bin/sh\n")
+	commitAll(t, dir)
+
+	_, stderr, code := lazyslurm(t, dir, "submit", "src/run.sh")
+	if code != 3 || !strings.Contains(stderr, "--yes") {
+		t.Fatalf("submit without --yes: exit %d, stderr %q", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(target, "work")); err == nil {
+		t.Error("an unconfirmed submit touched the target")
+	}
+	out, stderr, code := lazyslurm(t, dir, "--yes", "submit", "--sbatch", "--time=1", "--note", "first", "src/run.sh", "-x")
+	if code != 0 || out != "job 100 submitted on a\n" {
+		t.Fatalf("submit = %q, %q, exit %d", out, stderr, code)
+	}
+	journal, err := os.ReadFile(filepath.Join(dir, ".slurm", "jobs.jsonl"))
+	if err != nil || !strings.Contains(string(journal), `"args":["-x"]`) || !strings.Contains(string(journal), `"note":"first"`) {
+		t.Errorf("journal = %q, %v", journal, err)
+	}
+
+	out, _, _ = lazyslurm(t, dir, "status")
+	if !strings.HasPrefix(out, "100  ") || strings.Contains(out, "COMPLETED") {
+		t.Errorf("status before the job ends = %q", out)
+	}
+	write(t, filepath.Join(fake, "sacct"), "100|COMPLETED\n")
+	out, _, _ = lazyslurm(t, dir, "status")
+	if !strings.HasSuffix(out, "  1 COMPLETED  first\n") {
+		t.Errorf("status after = %q", out)
+	}
+	if out, _, _ = lazyslurm(t, dir, "status"); out != "" {
+		t.Errorf("a final job was shown twice: %q", out)
+	}
+
+	if out, stderr, code = lazyslurm(t, dir, "pull"); code != 0 || out != "pulled 0 paths from a\n" {
+		t.Errorf("pull = %q, %q, exit %d", out, stderr, code)
+	}
+	if _, _, code = lazyslurm(t, dir, "--yes", "submit", "nope.sh"); code != 1 {
+		t.Errorf("bad script: exit %d, want 1", code)
+	}
+	if _, _, code = lazyslurm(t, dir, "submit"); code != 2 {
+		t.Errorf("no script: exit %d, want 2", code)
 	}
 }
