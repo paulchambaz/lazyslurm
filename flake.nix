@@ -20,6 +20,7 @@
         go
         gopls
         just
+        vhs
       ];
     in {
       packages.default = pkgs.buildGoModule {
