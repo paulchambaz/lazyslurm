@@ -127,7 +127,12 @@ refreshes every 120 seconds and on *R*, with a single command on the cluster.
 	Push, pull.
 
 *s*
-	Submit: pick a script from *scripts*, then type its arguments, the sbatch
+	Submit. A picker lists the files that match *scripts*, the most recently
+	modified first, and shows the selected one, where the *#SBATCH* lines are.
+	Type to filter by fuzzy match (the letters in order, the closest match first),
+	*up* and *down* to move, *enter* to pick. *tab* or a click
+	moves to the preview to read it: *j* *k* *h* *l*, the arrows or the wheel
+	scroll it, *tab* or *esc* comes back. Then type the arguments, the sbatch
 	options and a note, then confirm.
 
 *:*
@@ -150,6 +155,11 @@ refreshes every 120 seconds and on *R*, with a single command on the cluster.
 
 *q*, *ctrl-c*
 	Quit.
+
+The mouse works too: a click focuses a panel and selects a line, a double
+click does what *enter* does, and the wheel moves the selection of a list or
+scrolls the main view. Clicks on views under a popup are ignored. A click on the log panel focuses it,
+and *j* *k* or the wheel scroll it; *esc* goes back.
 
 # OPTIONS
 

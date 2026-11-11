@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jesseduffield/gocui"
 )
@@ -46,7 +48,7 @@ func (u *tui) logText() string {
 
 func scriptRepo(t *testing.T, extra string) string {
 	t.Helper()
-	return jobRepo(t, Target{Dir: filepath.Join(t.TempDir(), "t")}, "scripts = [\"slurm/run.sh\"]\n"+extra)
+	return jobRepo(t, Target{Dir: filepath.Join(t.TempDir(), "t")}, "scripts = [\"slurm/*.sh\"]\n"+extra)
 }
 
 func TestLayoutDrawsEveryView(t *testing.T) {
@@ -315,7 +317,7 @@ func TestCommandPopupSuggestsTheHistory(t *testing.T) {
 	}
 	u.fill()
 	u.settle(t)
-	if got := pv.TextArea.GetContent(); got != "nvidia-smi" || u.g.CurrentView() != pv {
+	if got := strings.TrimSpace(pv.TextArea.GetContent()); got != "nvidia-smi" || u.g.CurrentView() != pv {
 		t.Errorf("input = %q, current %v", got, u.g.CurrentView())
 	}
 	u.dismiss()
@@ -392,5 +394,187 @@ func TestFilterIsInlineLiveAndEscClearsIt(t *testing.T) {
 	u.dismiss()
 	if u.m.filter != "" {
 		t.Errorf("esc while typing kept the filter %q", u.m.filter)
+	}
+}
+
+func TestMouseSelectsScrollsAndIgnoresViewsUnderAPopup(t *testing.T) {
+	u := newTestTUI(t, scriptRepo(t, ""))
+	u.m.fresh.jobs = []Job{{Job: "1", Script: "a.sh"}, {Job: "2", Script: "b.sh"}, {Job: "3", Script: "c.sh"}}
+	if err := u.bind(); err != nil {
+		t.Fatal(err)
+	}
+	if !u.g.Mouse {
+		t.Fatal("mouse not enabled")
+	}
+	u.click(jobsPanel, 2, false)
+	if u.m.focus != jobsPanel || u.m.sel[jobsPanel] != 2 {
+		t.Errorf("focus %d, sel %d after a click", u.m.focus, u.m.sel[jobsPanel])
+	}
+	u.click(jobsPanel, 9, false)
+	if u.m.sel[jobsPanel] != 2 {
+		t.Errorf("a click below the list moved the selection to %d", u.m.sel[jobsPanel])
+	}
+	u.wheel(jobsPanel, -1)
+	u.wheel(jobsPanel, -5)
+	if u.m.sel[jobsPanel] != 0 {
+		t.Errorf("sel = %d after the wheel", u.m.sel[jobsPanel])
+	}
+	u.click(hostsPanel, 0, false)
+	u.wheel(jobsPanel, 1)
+	if u.m.focus != hostsPanel || u.m.sel[jobsPanel] != 1 {
+		t.Errorf("the wheel changed the focus: %d, sel %d", u.m.focus, u.m.sel[jobsPanel])
+	}
+	u.focusMain()
+	u.scrollMain(3)
+	u.click(snapsPanel, 0, false)
+	if u.inMain {
+		t.Error("a click on a panel left the focus on the main view")
+	}
+	u.confirm("go?", func() {})
+	u.settle(t)
+	jobs, _ := u.g.View("jobs")
+	if u.g.ShouldHandleMouseEvent(jobs, gocui.MouseLeft) {
+		t.Error("a click on a panel is handled under a popup")
+	}
+	u.dismiss()
+	if !u.g.ShouldHandleMouseEvent(jobs, gocui.MouseLeft) {
+		t.Error("a click on a panel is ignored without a popup")
+	}
+}
+
+func TestSubmitPickerListsNewestScriptsWithTheirHeader(t *testing.T) {
+	root := scriptRepo(t, "")
+	old := filepath.Join(root, "slurm", "old.sh")
+	write(t, old, "#!/bin/bash\n#SBATCH --gres=gpu:1\necho old\n")
+	if err := os.Chtimes(old, time.Now().Add(-72*time.Hour), time.Now().Add(-72*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, "slurm", "new.sh"), "#!/bin/bash\n#SBATCH --time=09:00:00\necho new\n")
+	u := newTestTUI(t, root)
+	u.submit()
+	u.settle(t)
+	list, err := u.g.View(suggestView)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := strings.Split(strings.TrimSpace(list.Buffer()), "\n")
+	if len(rows) != 3 || !strings.Contains(rows[0], "new.sh") || !strings.Contains(rows[2], "old.sh") || strings.Contains(rows[2], "3d") {
+		t.Errorf("scripts = %q", rows)
+	}
+	prev, _ := u.g.View(previewView)
+	if !strings.Contains(prev.Buffer(), "#SBATCH --time=09:00:00") || prev.Title != "slurm/new.sh" {
+		t.Errorf("preview %q = %q", prev.Title, prev.Buffer())
+	}
+	u.pick(2)
+	u.settle(t)
+	if !strings.Contains(prev.Buffer(), "--gres=gpu:1") || prev.Title != "slurm/old.sh" {
+		t.Errorf("preview after moving %q = %q", prev.Title, prev.Buffer())
+	}
+	input, _ := u.g.View(popupView)
+	input.TextArea.TypeString("run")
+	u.settle(t)
+	if rows = strings.Split(strings.TrimSpace(list.Buffer()), "\n"); len(rows) != 1 || !strings.Contains(rows[0], "run.sh") {
+		t.Errorf("filtered scripts = %q", rows)
+	}
+	u.accept(input)
+	if u.pop == nil || u.pop.title != "Arguments" {
+		t.Errorf("popup after the pick = %v", u.pop)
+	}
+}
+
+func TestSubmitWithoutAMatchingScriptSaysSo(t *testing.T) {
+	u := newTestTUI(t, scriptRepo(t, ""))
+	u.m.cfg.Scripts = []string{"nothing/*.sh"}
+	u.submit()
+	if u.pop != nil || !strings.Contains(u.logText(), "no file matches") {
+		t.Errorf("popup %v, log %q", u.pop, u.logText())
+	}
+}
+
+func TestLogViewTakesTheFocusAndScrolls(t *testing.T) {
+	u := newTestTUI(t, scriptRepo(t, ""))
+	for i := range 60 {
+		u.log.add(fmt.Sprintf("result %d", i))
+	}
+	u.settle(t)
+	log, _ := u.g.View(logView)
+	if !strings.Contains(log.Buffer(), "result 59") || strings.Contains(log.Buffer(), "result 0\n") {
+		t.Fatalf("log does not follow the end: %q", log.Buffer())
+	}
+	u.focusLog()
+	u.scrollMain(-5)
+	u.settle(t)
+	if u.g.CurrentView() != log || u.logUp != 5 || strings.Contains(log.Buffer(), "result 59") || !strings.Contains(log.Buffer(), "result 54") {
+		t.Errorf("current %v, logUp %d, log %q", u.g.CurrentView(), u.logUp, log.Buffer())
+	}
+	u.scrollLog(-1000)
+	u.settle(t)
+	if u.logUp >= 1005 || !strings.Contains(log.Buffer(), "result 0") {
+		t.Errorf("logUp = %d is not clamped to the text", u.logUp)
+	}
+	u.move(1000)
+	u.settle(t)
+	if u.logUp != 0 || !strings.Contains(log.Buffer(), "result 59") {
+		t.Errorf("logUp = %d after scrolling down", u.logUp)
+	}
+	u.back()
+	u.settle(t)
+	if jobs, _ := u.g.View("jobs"); u.g.CurrentView() != jobs {
+		t.Errorf("current view = %v after esc", u.g.CurrentView())
+	}
+}
+
+func TestCommandPopupShowsAnEmptySuggestionPanelAndTheCursor(t *testing.T) {
+	u := newTestTUI(t, scriptRepo(t, ""))
+	u.exec()
+	u.settle(t)
+	if _, err := u.g.View(suggestView); err != nil {
+		t.Errorf("no suggestion panel without history: %v", err)
+	}
+	pv, _ := u.g.View(popupView)
+	if !u.g.Cursor || u.g.CurrentView() != pv || pv.Title != "Command:" {
+		t.Errorf("cursor %v, current %v, title %q", u.g.Cursor, u.g.CurrentView(), pv.Title)
+	}
+	u.dismiss()
+	u.settle(t)
+	if u.g.Cursor {
+		t.Error("cursor still shown after the popup closed")
+	}
+}
+
+func TestSubmitPreviewCanBeFocusedAndRead(t *testing.T) {
+	root := scriptRepo(t, "")
+	body := "#!/bin/bash\n"
+	for i := range 80 {
+		body += fmt.Sprintf("echo line%d %s\n", i, strings.Repeat("x", 120))
+	}
+	write(t, filepath.Join(root, "slurm", "long.sh"), body)
+	u := newTestTUI(t, root)
+	u.submit()
+	u.settle(t)
+	input, _ := u.g.View(popupView)
+	if got := input.TextArea.GetContent(); got != " " {
+		t.Errorf("the input has no margin: %q", got)
+	}
+	prev, _ := u.g.View(previewView)
+	u.focusSuggestions(true)
+	u.settle(t)
+	if u.g.CurrentView() != prev {
+		t.Fatalf("current view = %v, want the preview", u.g.CurrentView())
+	}
+	u.read(30, 8)
+	u.settle(t)
+	if !strings.Contains(prev.Buffer(), "line3") || u.pop.readY != 30 || u.pop.readX != 8 {
+		t.Errorf("readY %d, readX %d, preview %q", u.pop.readY, u.pop.readX, prev.Buffer())
+	}
+	u.read(1000, 1000)
+	u.settle(t)
+	if u.pop.readY >= 1000 || u.pop.readX >= 1000 {
+		t.Errorf("reading is not clamped: %d %d", u.pop.readY, u.pop.readX)
+	}
+	u.focusSuggestions(false)
+	u.settle(t)
+	if u.g.CurrentView() != input {
+		t.Errorf("current view = %v, want the input", u.g.CurrentView())
 	}
 }
