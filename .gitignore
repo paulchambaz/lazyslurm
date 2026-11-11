@@ -1,4 +1,5 @@
 /bin
+/src/src
 /result*
 /.direnv
 /lazyslurm.1
