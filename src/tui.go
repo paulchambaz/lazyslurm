@@ -1042,7 +1042,7 @@ func (u *tui) layout(g *gocui.Gui) error {
 	hostsEnd := min(len(m.hosts), 3) + 2
 	free := rows - hostsEnd
 	jobsEnd := hostsEnd + free*2/3
-	if m.focus == snapsPanel {
+	if m.focus == snapsPanel && !u.inMain && !u.inLog {
 		jobsEnd = hostsEnd + free/3
 	}
 	mainEnd := rows * 2 / 3

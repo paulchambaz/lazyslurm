@@ -695,3 +695,36 @@ func TestLogGrowsToTwoThirdsWhileItHasTheFocus(t *testing.T) {
 		t.Errorf("after esc: log %d rows", log.Height())
 	}
 }
+
+func TestSnapshotsShrinkWhenTheFocusLeavesThem(t *testing.T) {
+	setupFakeSlurm(t)
+	u := newTestTUI(t, scriptRepo(t, ""))
+	u.settle(t)
+	snaps, _ := u.g.View("snaps")
+	height := func() int {
+		u.settle(t)
+		return snaps.Height()
+	}
+	u.focusOn(jobsPanel)
+	small := height()
+	u.focusOn(snapsPanel)
+	large := height()
+	if large <= small {
+		t.Fatalf("snapshots: %d rows focused, %d unfocused", large, small)
+	}
+	for name, leave := range map[string]func() error{"main": u.focusMain, "log": u.focusLog, "jobs": func() error { return u.focusOn(jobsPanel) }} {
+		u.focusOn(snapsPanel)
+		height()
+		leave()
+		if got := height(); got != small {
+			t.Errorf("after leaving for %s: %d rows, want %d", name, got, small)
+		}
+	}
+	u.focusOn(snapsPanel)
+	u.focusMain()
+	height()
+	u.back()
+	if got := height(); got != large {
+		t.Errorf("back on snapshots: %d rows, want %d", got, large)
+	}
+}
