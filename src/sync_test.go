@@ -257,3 +257,31 @@ func TestSyncUpRefusesAnUncleanTree(t *testing.T) {
 		t.Errorf("dirty tree: err = %v", err)
 	}
 }
+
+func TestAllowDirtyLetsAPushSendTheWorktreeButNotUntrackedFiles(t *testing.T) {
+	for name, tg := range testTargets(t) {
+		root := syncRepo(t)
+		gitRun(t, root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c")
+		write(t, filepath.Join(root, "src", "a.py"), "edited\n")
+		write(t, filepath.Join(root, "src", "untracked.py"), "new\n")
+		cfg := syncConfig(tg)
+		cfg.PrePush = `echo "$GIT_DIRTY" > ../dirty.txt`
+		if _, err := syncUp(os.Stderr, root, cfg, false); err == nil {
+			t.Fatalf("%s: a dirty push is accepted without allow_dirty", name)
+		}
+		cfg.AllowDirty = true
+		s, err := syncUp(os.Stderr, root, cfg, false)
+		if err != nil || !s.Dirty {
+			t.Fatalf("%s: syncUp = %+v, %v", name, s, err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(s.Dir, "work", "src", "a.py")); string(got) != "edited\n" {
+			t.Errorf("%s: work/src/a.py = %q", name, got)
+		}
+		if exists(filepath.Join(s.Dir, "work", "src", "untracked.py")) {
+			t.Errorf("%s: an untracked file was sent", name)
+		}
+		if got, _ := os.ReadFile(filepath.Join(filepath.Dir(root), "dirty.txt")); string(got) != "1\n" {
+			t.Errorf("%s: pre_push saw GIT_DIRTY = %q", name, got)
+		}
+	}
+}

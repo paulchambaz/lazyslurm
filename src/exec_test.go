@@ -43,6 +43,23 @@ func TestExecRunsInWorkThroughSrun(t *testing.T) {
 	}
 }
 
+func TestExecWithAllowDirtyRunsTheWorktree(t *testing.T) {
+	for name, tg := range testTargets(t) {
+		setupFakeSlurm(t)
+		root := jobRepo(t, tg, "srun = \"--time=1\"\n")
+		write(t, filepath.Join(root, "src", "a.py"), "edited\n")
+		var out bytes.Buffer
+		if err := runExec(&out, root, "", []string{"true"}); err == nil || !strings.Contains(err.Error(), "not clean") {
+			t.Fatalf("%s: a dirty exec is accepted without allow_dirty: %v", name, err)
+		}
+		root = jobRepo(t, tg, "srun = \"--time=1\"\nallow_dirty = true\n")
+		write(t, filepath.Join(root, "src", "a.py"), "edited\n")
+		if err := runExec(&out, root, "", []string{`echo "$GIT_DIRTY"; cat src/a.py`}); err != nil || out.String() != "1\nedited\n" {
+			t.Errorf("%s: output = %q, %v", name, out.String(), err)
+		}
+	}
+}
+
 func TestExecQuotesSeveralArgumentsAndReturnsTheStatus(t *testing.T) {
 	for name, tg := range testTargets(t) {
 		setupFakeSlurm(t)

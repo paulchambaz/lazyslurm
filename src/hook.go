@@ -7,12 +7,15 @@ import (
 	"strings"
 )
 
-func hookEnv(commit string, dirty bool, host string) []string {
-	d := "0"
+func dirtyFlag(dirty bool) string {
 	if dirty {
-		d = "1"
+		return "1"
 	}
-	return []string{"GIT_COMMIT=" + commit, "GIT_DIRTY=" + d, "CLUSTER=" + host}
+	return "0"
+}
+
+func hookEnv(commit string, dirty bool, host string) []string {
+	return []string{"GIT_COMMIT=" + commit, "GIT_DIRTY=" + dirtyFlag(dirty), "CLUSTER=" + host}
 }
 
 func runHook(w io.Writer, name string, c *exec.Cmd) error {

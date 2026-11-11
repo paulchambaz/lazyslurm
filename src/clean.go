@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,16 +58,6 @@ func cleanable(cfg Config, path string) bool {
 		ok, err := filepath.Match(cleanParent(p), filepath.Dir(path))
 		return err == nil && ok
 	})
-}
-
-func rsyncOut(stdin io.Reader, args ...string) (string, error) {
-	c := command("rsync", append([]string{"-e", "ssh -o BatchMode=yes"}, args...)...)
-	var out, errOut bytes.Buffer
-	c.Stdin, c.Stdout, c.Stderr = stdin, &out, &errOut
-	if err := c.Run(); err != nil {
-		return "", fmt.Errorf("rsync: %w: %s", err, strings.TrimSpace(errOut.String()))
-	}
-	return out.String(), nil
 }
 
 func cleanCandidates(root string, cfg Config, dir string) ([]string, map[string]Job, error) {

@@ -30,39 +30,41 @@ type Target struct {
 
 // Config is the .slurm/config of a repo resolved for one host.
 type Config struct {
-	Host     string
-	Target   Target
-	Push     []string
-	Exclude  []string
-	Keep     []string
-	Pull     []string
-	Clean    []string
-	Scripts  []string
-	Prelude  string
-	Srun     string
-	Sbatch   string
-	PrePush  string
-	PostPush string
-	PrePull  string
-	PostPull string
+	Host       string
+	Target     Target
+	Push       []string
+	Exclude    []string
+	Keep       []string
+	Pull       []string
+	Clean      []string
+	Scripts    []string
+	AllowDirty bool
+	Prelude    string
+	Srun       string
+	Sbatch     string
+	PrePush    string
+	PostPush   string
+	PrePull    string
+	PostPull   string
 }
 
 type table struct {
-	Host     *string
-	Target   *string
-	Push     []string
-	Exclude  []string
-	Keep     []string
-	Pull     []string
-	Clean    []string
-	Scripts  []string
-	Prelude  *string
-	Srun     *string
-	Sbatch   *string
-	PrePush  *string `toml:"pre_push"`
-	PostPush *string `toml:"post_push"`
-	PrePull  *string `toml:"pre_pull"`
-	PostPull *string `toml:"post_pull"`
+	Host       *string
+	Target     *string
+	Push       []string
+	Exclude    []string
+	Keep       []string
+	Pull       []string
+	Clean      []string
+	Scripts    []string
+	AllowDirty *bool `toml:"allow_dirty"`
+	Prelude    *string
+	Srun       *string
+	Sbatch     *string
+	PrePush    *string `toml:"pre_push"`
+	PostPush   *string `toml:"post_push"`
+	PrePull    *string `toml:"pre_pull"`
+	PostPull   *string `toml:"post_pull"`
 }
 
 type file struct {
@@ -169,6 +171,12 @@ func merge(name string, def, host table) (Config, error) {
 		}
 		return ""
 	}
+	flag := func(h, d *bool) bool {
+		if h != nil {
+			return *h
+		}
+		return d != nil && *d
+	}
 	list := func(h, d []string) []string {
 		if h != nil {
 			return h
@@ -183,21 +191,22 @@ func merge(name string, def, host table) (Config, error) {
 		return Config{}, fmt.Errorf("hosts.%s.target: %w", name, err)
 	}
 	return Config{
-		Host:     name,
-		Target:   target,
-		Push:     list(host.Push, def.Push),
-		Exclude:  list(host.Exclude, def.Exclude),
-		Keep:     list(host.Keep, def.Keep),
-		Pull:     list(host.Pull, def.Pull),
-		Clean:    list(host.Clean, def.Clean),
-		Scripts:  list(host.Scripts, def.Scripts),
-		Prelude:  pick(host.Prelude, def.Prelude),
-		Srun:     pick(host.Srun, def.Srun),
-		Sbatch:   pick(host.Sbatch, def.Sbatch),
-		PrePush:  pick(host.PrePush, def.PrePush),
-		PostPush: pick(host.PostPush, def.PostPush),
-		PrePull:  pick(host.PrePull, def.PrePull),
-		PostPull: pick(host.PostPull, def.PostPull),
+		Host:       name,
+		Target:     target,
+		Push:       list(host.Push, def.Push),
+		Exclude:    list(host.Exclude, def.Exclude),
+		Keep:       list(host.Keep, def.Keep),
+		Pull:       list(host.Pull, def.Pull),
+		Clean:      list(host.Clean, def.Clean),
+		Scripts:    list(host.Scripts, def.Scripts),
+		AllowDirty: flag(host.AllowDirty, def.AllowDirty),
+		Prelude:    pick(host.Prelude, def.Prelude),
+		Srun:       pick(host.Srun, def.Srun),
+		Sbatch:     pick(host.Sbatch, def.Sbatch),
+		PrePush:    pick(host.PrePush, def.PrePush),
+		PostPush:   pick(host.PostPush, def.PostPush),
+		PrePull:    pick(host.PrePull, def.PrePull),
+		PostPull:   pick(host.PostPull, def.PostPull),
 	}, nil
 }
 

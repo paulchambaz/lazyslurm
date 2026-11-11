@@ -9,6 +9,9 @@ import (
 	"strings"
 )
 
+// batchMode is "yes" so that ssh never waits for a password; the UI sets it to "no" and answers prompts itself.
+var batchMode = "yes"
+
 func quote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
@@ -29,7 +32,7 @@ func (t Target) interactive(script string, tty bool) (*exec.Cmd, string) {
 	if t.Alias == "" {
 		return command("bash", "-c", script), "bash"
 	}
-	args := []string{"-o", "BatchMode=yes"}
+	args := []string{"-o", "BatchMode=" + batchMode}
 	if tty {
 		args = append(args, "-t")
 	}

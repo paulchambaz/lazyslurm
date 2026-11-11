@@ -70,6 +70,7 @@ const (
 	helpPopup
 	filterPopup
 	scriptPopup
+	credentialPopup
 )
 
 type popup struct {
@@ -79,6 +80,9 @@ type popup struct {
 	text  string
 	sel   int
 	ok    func(string)
+
+	cancel func()
+	secret bool
 
 	history []string
 	matches []string
@@ -140,6 +144,8 @@ type tui struct {
 	inLog  bool
 	logUp  int
 	past   []string
+	asks   []func()
+	ask    *askpass
 }
 
 func newTUI(g *gocui.Gui, root string, hosts []string, host string, cfg Config) *tui {
@@ -182,6 +188,10 @@ func runTUI(root, hostFlag string) error {
 	}
 	hookOut = u.log
 	defer func() { hookOut = os.Stderr }()
+	if err := u.listenForPasswords(); err != nil {
+		u.log.add("error: " + err.Error())
+	}
+	defer u.stopListening()
 	g.SetManagerFunc(u.layout)
 	if err := u.bind(); err != nil {
 		return err
@@ -255,6 +265,63 @@ func (u *tui) finish(label string, err error, f fresh, rerr error, apply func())
 		u.timer = time.AfterFunc(refreshEvery, func() {
 			u.post(func() { u.start("refresh", nil, nil) })
 		})
+	}
+}
+
+func (u *tui) listenForPasswords() error {
+	ap, err := startAskpass(u.askSecret)
+	if err != nil {
+		return err
+	}
+	u.ask = ap
+	for _, kv := range ap.env() {
+		name, value, _ := strings.Cut(kv, "=")
+		if err := os.Setenv(name, value); err != nil {
+			return err
+		}
+	}
+	batchMode = "no"
+	return nil
+}
+
+func (u *tui) stopListening() {
+	ap := u.ask
+	if ap == nil {
+		return
+	}
+	u.ask = nil
+	batchMode = "yes"
+	for _, kv := range ap.env() {
+		name, _, _ := strings.Cut(kv, "=")
+		os.Unsetenv(name)
+	}
+	ap.close()
+}
+
+// askSecret shows an ssh prompt as a popup, once no other popup is open, and waits for the answer.
+func (u *tui) askSecret(prompt string, stop <-chan struct{}) (string, bool) {
+	title, secret := credentialTitle(prompt)
+	answer := make(chan *string, 1)
+	u.post(func() {
+		if !secret {
+			for line := range strings.SplitSeq(strings.TrimSpace(prompt), "\n") {
+				u.log.add("ssh: " + strings.TrimSpace(line))
+			}
+		}
+		u.asks = append(u.asks, func() {
+			u.open(&popup{kind: credentialPopup, title: title, secret: secret,
+				ok:     func(s string) { answer <- &s },
+				cancel: func() { answer <- nil }})
+		})
+	})
+	select {
+	case a := <-answer:
+		if a == nil {
+			return "", false
+		}
+		return *a, true
+	case <-stop:
+		return "", false
 	}
 }
 
@@ -539,6 +606,10 @@ func (u *tui) exec() error {
 		}
 		hookOut = os.Stderr
 		defer func() { hookOut = u.log }()
+		if u.ask != nil {
+			os.Unsetenv("SSH_ASKPASS_REQUIRE")
+			defer os.Setenv("SSH_ASKPASS_REQUIRE", "force")
+		}
 		if err := u.g.Suspend(); err != nil {
 			u.log.add("exec: " + err.Error())
 			return
@@ -786,11 +857,15 @@ func (u *tui) fill() error {
 }
 
 func (u *tui) dismiss() error {
-	if u.pop != nil && u.pop.kind == filterPopup {
+	p := u.pop
+	if p != nil && p.kind == filterPopup {
 		u.m.filter = ""
 		u.m.clamp()
 	}
 	u.pop = nil
+	if p != nil && p.cancel != nil {
+		p.cancel()
+	}
 	return nil
 }
 
@@ -830,6 +905,8 @@ func (u *tui) accept(v *gocui.View) error {
 		}
 	case inputPopup:
 		p.ok(strings.TrimSpace(v.TextArea.GetContent()))
+	case credentialPopup:
+		p.ok(v.TextArea.GetContent())
 	}
 	return nil
 }
@@ -925,6 +1002,11 @@ func (u *tui) layout(g *gocui.Gui) error {
 	w, h := g.Size()
 	if w < 40 || h < 14 {
 		return nil
+	}
+	if u.pop == nil && len(u.asks) > 0 {
+		open := u.asks[0]
+		u.asks = u.asks[1:]
+		open()
 	}
 	m := u.m
 	if p := u.pop; p != nil && p.kind == filterPopup && p.id == u.drawn {
@@ -1146,6 +1228,13 @@ func (u *tui) drawPopup(g *gocui.Gui, w, h int) error {
 	case confirmPopup:
 		v.Clear()
 		fmt.Fprint(v, p.text+" [y/N]")
+	case credentialPopup:
+		if created {
+			v.Editable, v.Editor = true, gocui.DefaultEditor
+			if p.secret {
+				v.Mask = "*"
+			}
+		}
 	case inputPopup:
 		if created {
 			v.Editable, v.Editor = true, gocui.DefaultEditor

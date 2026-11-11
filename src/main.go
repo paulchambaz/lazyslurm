@@ -54,6 +54,9 @@ type usageError string
 func (e usageError) Error() string { return string(e) }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == askpassCommand {
+		os.Exit(runAskpass(os.Args[2:]))
+	}
 	err := run(os.Args[1:])
 	if err == nil {
 		return

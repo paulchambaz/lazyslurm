@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -124,6 +125,141 @@ func TestSubmitReusesASnapshotAndKeepsOldOnes(t *testing.T) {
 				t.Errorf("%s: snapshot %s has %q, want %q", name, commit[:8], got, want)
 			}
 		}
+	}
+}
+
+func journalCommits(t *testing.T, root string) []string {
+	t.Helper()
+	jobs, err := readJournal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commits := make([]string, len(jobs))
+	for i, j := range jobs {
+		commits[i] = j.Commit
+	}
+	return commits
+}
+
+func TestSubmitWithAllowDirtyRunsTheWorktreeInItsOwnSnapshot(t *testing.T) {
+	for name, tg := range testTargets(t) {
+		fake := setupFakeSlurm(t)
+		root := jobRepo(t, tg, "allow_dirty = true\npost_push = 'echo \"$GIT_COMMIT $GIT_DIRTY\" > hooked'\n")
+		head, err := headCommit(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir, err := tg.resolve()
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(root, "src", "a.py"), "edited\n")
+		write(t, filepath.Join(root, "src", "new.py"), "untracked\n")
+		if _, err := submit(root, "slurm/run.sh"); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		c1 := journalCommits(t, root)[0]
+		if c1 == head || len(c1) != 40 {
+			t.Fatalf("%s: snapshot name = %q, head %q", name, c1, head)
+		}
+		if out, err := exec.Command("git", "-C", root, "cat-file", "-t", c1).Output(); err != nil || strings.TrimSpace(string(out)) != "commit" {
+			t.Errorf("%s: %s is not a commit: %q, %v", name, c1, out, err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dir, c1, "src", "a.py")); string(got) != "edited\n" {
+			t.Errorf("%s: snapshot a.py = %q", name, got)
+		}
+		if exists(filepath.Join(dir, c1, "src", "new.py")) || exists(filepath.Join(dir, head)) {
+			t.Errorf("%s: an untracked file was sent or HEAD got a snapshot", name)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dir, c1, "hooked")); string(got) != c1+" 1\n" {
+			t.Errorf("%s: post_push saw %q", name, got)
+		}
+		if log, _ := os.ReadFile(filepath.Join(fake, "sbatch.log")); !strings.Contains(string(log), "ALL,GIT_COMMIT="+c1+"\n") {
+			t.Errorf("%s: sbatch log %q", name, log)
+		}
+		if _, err := submit(root, "slurm/run.sh"); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if commits := journalCommits(t, root); commits[1] != c1 {
+			t.Errorf("%s: the same state got another snapshot: %v", name, commits)
+		}
+		write(t, filepath.Join(root, "src", "a.py"), "edited again\n")
+		if _, err := submit(root, "slurm/run.sh"); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		c2 := journalCommits(t, root)[2]
+		if c2 == c1 {
+			t.Fatalf("%s: a new state reused the snapshot", name)
+		}
+		for c, want := range map[string]string{c1: "edited\n", c2: "edited again\n"} {
+			if got, _ := os.ReadFile(filepath.Join(dir, c, "src", "a.py")); string(got) != want {
+				t.Errorf("%s: snapshot %s a.py = %q, want %q", name, c[:8], got, want)
+			}
+		}
+	}
+}
+
+func TestRetryRebuildsADirtySnapshotFromTheWorktreeCommit(t *testing.T) {
+	for name, tg := range testTargets(t) {
+		fake := setupFakeSlurm(t)
+		root := jobRepo(t, tg, "allow_dirty = true\n")
+		write(t, filepath.Join(root, "src", "a.py"), "edited\n")
+		if _, err := submit(root, "slurm/run.sh"); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		c1 := journalCommits(t, root)[0]
+		dir, err := tg.resolve()
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(root, "src", "a.py"), "other\n")
+		if _, err := submit(root, "slurm/run.sh"); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if err := os.RemoveAll(filepath.Join(dir, c1)); err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(root, "src", "a.py"), "edited since\n")
+		write(t, filepath.Join(fake, "sacct"), "100|FAILED\n")
+		var out bytes.Buffer
+		if err := runRetry(&out, root, "", confirmer{Yes: true}, false, []string{"100"}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got, _ := os.ReadFile(filepath.Join(dir, c1, "src", "a.py")); string(got) != "edited\n" {
+			t.Errorf("%s: rebuilt a.py = %q, want the content of the first run", name, got)
+		}
+		if commits := journalCommits(t, root); len(commits) != 3 || commits[2] != c1 {
+			t.Errorf("%s: the retry journaled %v", name, commits)
+		}
+	}
+}
+
+func TestSubmitWithAllowDirtyOnACleanTreeOrOnlyUntrackedFilesUsesHead(t *testing.T) {
+	tg := testTargets(t)["local"]
+	setupFakeSlurm(t)
+	root := jobRepo(t, tg, "allow_dirty = true\n")
+	head, err := headCommit(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := submit(root, "slurm/run.sh"); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, "src", "new.py"), "untracked\n")
+	if _, err := submit(root, "slurm/run.sh"); err != nil {
+		t.Fatal(err)
+	}
+	for i, c := range journalCommits(t, root) {
+		if c != head {
+			t.Errorf("job %d: commit = %s, want HEAD %s", i, c, head)
+		}
+	}
+	dir, err := tg.resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists(filepath.Join(dir, head, "src", "new.py")) {
+		t.Error("an untracked file was sent")
 	}
 }
 

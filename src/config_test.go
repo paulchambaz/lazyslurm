@@ -194,3 +194,25 @@ func TestOldConfigLocationIsReported(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestAllowDirtyDefaultsToFalseAndCanBeSetPerHost(t *testing.T) {
+	for _, tt := range []struct {
+		name, body string
+		want       bool
+	}{
+		{"default", "", false},
+		{"default table", "allow_dirty = true\n", true},
+		{"host overrides", "allow_dirty = true\n", false},
+	} {
+		root := t.TempDir()
+		host := "target = \"/x\"\n"
+		if tt.name == "host overrides" {
+			host += "allow_dirty = false\n"
+		}
+		write(t, filepath.Join(root, configFile), "[default]\npush = [\"src\"]\n"+tt.body+"[hosts.h]\n"+host)
+		cfg, err := loadConfig(root, "")
+		if err != nil || cfg.AllowDirty != tt.want {
+			t.Errorf("%s: allow_dirty = %v, %v, want %v", tt.name, cfg.AllowDirty, err, tt.want)
+		}
+	}
+}

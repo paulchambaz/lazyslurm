@@ -17,6 +17,9 @@ func checkScript(root string, cfg Config, script string) error {
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("%s is not tracked by git", script)
 	}
+	if cfg.AllowDirty {
+		return nil
+	}
 	return requireClean(root, cfg)
 }
 

@@ -35,7 +35,7 @@ func runExec(w io.Writer, root, hostFlag string, args []string) error {
 	if cfg.Prelude != "" {
 		line += " && " + cfg.Prelude
 	}
-	line += " && export GIT_COMMIT=" + s.Commit + " GIT_DIRTY=0"
+	line += " && export GIT_COMMIT=" + s.Commit + " GIT_DIRTY=" + dirtyFlag(s.Dirty)
 	line += " && srun " + cfg.Srun + " bash -c " + quote(command)
 	c, _ := cfg.Target.interactive(line, isTerminal(os.Stdin))
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, w, os.Stderr

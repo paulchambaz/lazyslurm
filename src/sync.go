@@ -88,13 +88,18 @@ func prepareScript(cfg Config, dir, tree string) string {
 }
 
 func rsync(stdin io.Reader, args ...string) error {
-	c := command("rsync", append([]string{"-e", "ssh -o BatchMode=yes"}, args...)...)
-	var errOut bytes.Buffer
-	c.Stdin, c.Stderr = stdin, &errOut
+	_, err := rsyncOut(stdin, args...)
+	return err
+}
+
+func rsyncOut(stdin io.Reader, args ...string) (string, error) {
+	c := command("rsync", append([]string{"-e", "ssh -o BatchMode=" + batchMode}, args...)...)
+	var out, errOut bytes.Buffer
+	c.Stdin, c.Stdout, c.Stderr = stdin, &out, &errOut
 	if err := c.Run(); err != nil {
-		return fmt.Errorf("rsync: %w: %s", err, strings.TrimSpace(errOut.String()))
+		return "", fmt.Errorf("rsync: %w: %s", err, strings.TrimSpace(errOut.String()))
 	}
-	return nil
+	return out.String(), nil
 }
 
 func send(root string, t Target, dir string, files []string) error {
@@ -121,6 +126,26 @@ func dirty(root string, cfg Config) (bool, error) {
 	return len(out) > 0, nil
 }
 
+// worktreeCommit records the tracked files as they are in the working tree as a commit, without touching any ref.
+// The author and the dates are fixed, so the same state gives the same hash.
+func worktreeCommit(root, head string) (string, error) {
+	c := command("git", "stash", "create")
+	c.Dir = root
+	c.Env = append(c.Env,
+		"GIT_AUTHOR_NAME=lazyslurm", "GIT_AUTHOR_EMAIL=lazyslurm@localhost", "GIT_AUTHOR_DATE=1970-01-01T00:00:00Z",
+		"GIT_COMMITTER_NAME=lazyslurm", "GIT_COMMITTER_EMAIL=lazyslurm@localhost", "GIT_COMMITTER_DATE=1970-01-01T00:00:00Z")
+	out, err := c.Output()
+	if err != nil {
+		return "", fmt.Errorf("git stash create: %w", err)
+	}
+	if commit := strings.TrimSpace(string(out)); commit != "" {
+		return commit, nil
+	}
+	return head, nil
+}
+
+var errDirty = errors.New("the tree under push is not clean: commit or stash first")
+
 // requireClean fails when the push paths hold changes or untracked files git does not ignore.
 func requireClean(root string, cfg Config) error {
 	isDirty, err := dirty(root, cfg)
@@ -128,7 +153,7 @@ func requireClean(root string, cfg Config) error {
 		return err
 	}
 	if isDirty {
-		return errors.New("the tree under push is not clean: commit or stash first")
+		return errDirty
 	}
 	return nil
 }
@@ -197,20 +222,31 @@ func snapshot(t Target, dir, commit string) error {
 type synced struct {
 	Dir     string
 	Commit  string
+	Dirty   bool
 	Sent    int
 	Removed int
 }
 
-// syncUp runs pre_push, sends the push set, snapshots HEAD when asked, then runs post_push.
+// syncUp runs pre_push, sends the push set, snapshots when asked, then runs post_push.
+// A dirty tree is refused unless allow_dirty is set; its snapshot is named after worktreeCommit.
 func syncUp(w io.Writer, root string, cfg Config, snap bool) (synced, error) {
 	commit, err := headCommit(root)
 	if err != nil {
 		return synced{}, err
 	}
-	if err := requireClean(root, cfg); err != nil {
+	isDirty, err := dirty(root, cfg)
+	if err != nil {
 		return synced{}, err
 	}
-	env := hookEnv(commit, false, cfg.Host)
+	if isDirty && !cfg.AllowDirty {
+		return synced{}, errDirty
+	}
+	if isDirty && snap {
+		if commit, err = worktreeCommit(root, commit); err != nil {
+			return synced{}, err
+		}
+	}
+	env := hookEnv(commit, isDirty, cfg.Host)
 	if err := localHook(w, "pre_push", root, cfg.PrePush, env); err != nil {
 		return synced{}, err
 	}
@@ -222,7 +258,7 @@ func syncUp(w io.Writer, root string, cfg Config, snap bool) (synced, error) {
 	if err != nil {
 		return synced{}, err
 	}
-	s := synced{Dir: dir, Commit: commit}
+	s := synced{Dir: dir, Commit: commit, Dirty: isDirty}
 	s.Sent, s.Removed, err = push(root, cfg, dir)
 	if err == nil && snap {
 		err = snapshot(cfg.Target, dir, commit)

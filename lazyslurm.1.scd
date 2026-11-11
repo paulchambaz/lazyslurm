@@ -25,14 +25,17 @@ Without a command, the UI opens. See *THE UI*.
 	Send the tracked files under the *push* paths to *work/* on the target, and
 	remove from it the files no longer in the set. Refused when the tree under
 	the *push* paths is not clean, untracked files included, so *work/* always
-	holds a commit. Files that did not change are not sent again.
+	holds a commit, unless *allow_dirty* is set: the tracked files are then
+	sent as they are in the working tree, untracked ones are still not sent. Files that did not change are not sent again.
 	Runs the *pre_push* hook locally before, and *post_push* on the target
 	after, in *work/*.
 
 *submit* [*--sbatch* _OPTS_] [*--note* _TEXT_] _SCRIPT_ [_ARGS_...]
 	Submit _SCRIPT_, a tracked file inside the *push* paths given relative to
 	the repository root, as an *sbatch* job running the commit at HEAD. The
-	tree under the *push* paths must be clean. The files are sent, an
+	tree under the *push* paths must be clean, unless *allow_dirty* is set: the
+	snapshot is then named after a commit that *git stash create* makes of the
+	tracked files as they are, with no ref. The files are sent, an
 	immutable hardlink snapshot named after the commit is made on the target,
 	and *sbatch* runs there. The job is appended to the journal. Needs *--yes*:
 	without it, nothing is done and the exit status is 3. *post_push* runs in
@@ -79,7 +82,7 @@ Without a command, the UI opens. See *THE UI*.
 	is followed until interrupted; the job must have started.
 
 *exec* [*--*] _COMMAND_...
-	Send the files like *push* (same clean tree rule), then run _COMMAND_ in *work/* through *srun*
+	Send the files like *push* (same clean tree rule, also lifted by *allow_dirty*), then run _COMMAND_ in *work/* through *srun*
 	with the *srun* options of the host, after the *prelude*. One argument is
 	a shell command line, several are quoted one by one. Refused without a
 	*srun* key. The exit status is the command's. Not journaled, not
@@ -180,6 +183,13 @@ cluster.
 
 *q*, *ctrl-c*
 	Quit.
+
+When *ssh* asks for a key passphrase, a password, a PIN or a code, the UI
+opens a popup to answer, with the input masked (*enter* answers, *esc*
+cancels and makes *ssh* fail). It sets *SSH_ASKPASS* and
+*SSH_ASKPASS_REQUIRE*, so it needs OpenSSH 8.4 or later. The commands never
+prompt: they run *ssh* with *BatchMode=yes*, so open a master connection
+first if the cluster needs a password.
 
 The mouse works too: a click focuses a panel and selects a line, a double
 click does what *enter* does, and the wheel moves the selection of a list or
