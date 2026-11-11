@@ -99,12 +99,13 @@ Without a command, the UI opens. See *THE UI*.
 Three panels on the left: *1* Hosts, *2* Jobs of the selected host, newest
 first, and *3* Snapshots. The main view shows the selection; the log panel
 shows the results of the tasks, the output of hooks and the errors, and no
-command lines. Each job starts with a mark: a green check when it completed, a
-red cross when a task failed, a cyan dot while it runs, a yellow circle while
-it waits, a magenta slash when it was cancelled. While a task runs, its name and
-an animated dot appear at the bottom left, before the keys. The UI calls the same
-functions as the commands above, one task at a time, in the background. It
-refreshes every 120 seconds and on *R*, with a single command on the cluster.
+command lines. A job line reads the job id, the name of its script, and its
+task counts at the right, each with a mark: a green check (completed), a red
+cross (failed), a cyan dot (running), a yellow circle (waiting), a magenta
+slash (cancelled). While a task runs, its name and an animated dot appear at
+the bottom left, before the keys. The UI calls the same functions as the
+commands above, one task at a time, in the background. It refreshes every 120
+seconds with a single command on the cluster.
 
 *1* *2* *3*, *[* *]*, *tab*
 	Go to a panel.
@@ -122,6 +123,9 @@ refreshes every 120 seconds and on *R*, with a single command on the cluster.
 */*
 	Filter the jobs by job id, script or note, as you type on the bottom line.
 	*enter* keeps the filter, *esc* clears it.
+
+*R*
+	Refresh now.
 
 *P* *p*
 	Push, pull.
@@ -158,8 +162,8 @@ refreshes every 120 seconds and on *R*, with a single command on the cluster.
 
 The mouse works too: a click focuses a panel and selects a line, a double
 click does what *enter* does, and the wheel moves the selection of a list or
-scrolls the main view. Clicks on views under a popup are ignored. A click on the log panel focuses it,
-and *j* *k* or the wheel scroll it; *esc* goes back.
+scrolls the main view. A click on the log panel focuses it, and *j* *k* or the
+wheel scroll it; *esc* goes back. Clicks on views under a popup are ignored.
 
 # OPTIONS
 
@@ -197,6 +201,9 @@ _.slurm/jobs.jsonl_
 
 _.slurm/seen_
 	Jobs already shown in a final state.
+
+_.slurm/history_
+	Commands typed after *:* in the UI, one per line.
 
 # SEE ALSO
 
