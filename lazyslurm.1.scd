@@ -22,6 +22,11 @@ Without a command, the UI opens; it only draws a window for now. Press *q* or
 
 # COMMANDS
 
+*push*
+	Send the tracked and untracked, not ignored, files under the *push* paths
+	to *work/* on the target, and remove from it the files no longer in the
+	set. Local changes are sent. Files that did not change are not sent again.
+
 *status* [*--all*] [_JOB_]
 	List the jobs of the journal, newest first, for the selected host or for
 	all hosts when none is selected. Jobs already seen are hidden unless

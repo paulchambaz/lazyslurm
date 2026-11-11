@@ -139,3 +139,39 @@ func TestStatusReportsABrokenConfig(t *testing.T) {
 		t.Errorf("exit %d, stderr %q", code, stderr)
 	}
 }
+
+func pushRepo(t *testing.T) (dir, target string) {
+	t.Helper()
+	dir, target = repo(t), filepath.Join(t.TempDir(), "target")
+	write(t, filepath.Join(dir, ".slurm.toml"), "[default]\npush = [\"src\"]\n[hosts.a]\ntarget = \""+target+"\"\n")
+	write(t, filepath.Join(dir, "src", "a.py"), "a\n")
+	return dir, target
+}
+
+func TestPushSendsToALocalTarget(t *testing.T) {
+	dir, target := pushRepo(t)
+	out, stderr, code := lazyslurm(t, dir, "push")
+	if code != 0 || out != "pushed 1 files to a (0 removed)\n" {
+		t.Fatalf("push = %q, %q, exit %d", out, stderr, code)
+	}
+	if got, err := os.ReadFile(filepath.Join(target, "work", "src", "a.py")); err != nil || string(got) != "a\n" {
+		t.Errorf("work/src/a.py = %q, %v", got, err)
+	}
+	out, _, code = lazyslurm(t, dir, "push", "--json")
+	if code != 0 || out != `{"host":"a","files":1,"removed":0}`+"\n" {
+		t.Errorf("push --json = %q, exit %d", out, code)
+	}
+}
+
+func TestPushErrors(t *testing.T) {
+	dir, _ := pushRepo(t)
+	if _, _, code := lazyslurm(t, dir, "push", "extra"); code != 2 {
+		t.Errorf("push extra: exit %d, want 2", code)
+	}
+	if _, stderr, code := lazyslurm(t, dir, "-H", "nope", "push"); code != 1 || !strings.Contains(stderr, "a") {
+		t.Errorf("-H nope: exit %d, stderr %q", code, stderr)
+	}
+	if _, stderr, code := lazyslurm(t, repo(t), "push"); code != 1 || !strings.Contains(stderr, ".slurm.toml") {
+		t.Errorf("no config: exit %d, stderr %q", code, stderr)
+	}
+}

@@ -22,6 +22,7 @@ A terminal UI for Slurm clusters, opened from a repo. Without a command it
 opens the UI.
 
 commands:
+  push                  send the push set to work/ on the target
   status [--all] [JOB]  list the jobs of the journal
 
 options:
@@ -85,6 +86,12 @@ func run(args []string) error {
 			return err
 		}
 		return runStatus(os.Stdout, root, *hostFlag, *all, *asJSON, rest)
+	case "push":
+		root, err := repoRoot()
+		if err != nil {
+			return err
+		}
+		return runPush(os.Stdout, root, *hostFlag, *asJSON, rest)
 	}
 	return usageError(fmt.Sprintf("unknown command %q", command))
 }

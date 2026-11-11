@@ -223,6 +223,9 @@ func validate(c *Config) error {
 		if strings.Contains(e, "/") {
 			return fmt.Errorf("exclude: %q contains a slash", e)
 		}
+		if _, err := filepath.Match(e, ""); err != nil {
+			return fmt.Errorf("exclude: %q: %w", e, err)
+		}
 	}
 	return nil
 }

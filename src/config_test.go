@@ -160,6 +160,7 @@ func TestConfigErrors(t *testing.T) {
 		{"equal push and keep", "[default]\npush = [\"src\"]\nkeep = [\"src\"]\n" + host, "keep"},
 		{"nested push and keep", "[default]\npush = [\"src\"]\nkeep = [\"src/data\"]\n" + host, "keep"},
 		{"pull outside keep", "[default]\npush = [\"src\"]\nkeep = [\"out\"]\npull = [\"logs\"]\n" + host, "pull"},
+		{"exclude bad glob", "[default]\npush = [\"src\"]\nexclude = [\"[\"]\n" + host, "exclude"},
 		{"exclude slash", "[default]\npush = [\"src\"]\nexclude = [\"a/b\"]\n" + host, "exclude"},
 	}
 	t.Setenv("CLUSTER", "")
