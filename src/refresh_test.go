@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +61,30 @@ func TestRefreshKeepsWhatItHadWhenTheClusterFails(t *testing.T) {
 	}
 	if len(f.jobs) != 1 || f.states["100"].States["RUNNING"] != 1 {
 		t.Errorf("fresh = %v", f)
+	}
+}
+
+func TestRefreshUsesOneCommandOnTheCluster(t *testing.T) {
+	setupFakeSlurm(t)
+	root := jobRepo(t, Target{Dir: filepath.Join(t.TempDir(), "t")}, "")
+	if _, err := submit(root, "slurm/run.sh"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	trace = func(line string) {
+		if !strings.HasPrefix(line, "git ") {
+			calls++
+		}
+	}
+	t.Cleanup(func() { trace = nil })
+	if _, err := refresh(root, cfg, fresh{}); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Errorf("refresh ran %d commands, want 1", calls)
 	}
 }

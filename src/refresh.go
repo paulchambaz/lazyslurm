@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 )
 
-const firstQuery = 100
+const (
+	firstQuery  = 100
+	sectionMark = "@@lazyslurm "
+)
 
 // refresh reads the journal and asks the host for states and snapshots, keeping prev where a step fails.
 func refresh(root string, cfg Config, prev fresh) (fresh, error) {
@@ -33,13 +37,14 @@ func refresh(root string, cfg Config, prev fresh) (fresh, error) {
 	if f.states == nil {
 		f.states = map[string]jobState{}
 	}
-	if len(query) > 0 {
-		states, _, err := fetchStates(cfg.Target, query, time.Now())
-		if err != nil {
-			return f, fmt.Errorf("states on %s: %w", cfg.Host, err)
-		}
-		maps.Copy(f.states, states)
+	script := refreshScript(cfg.Target, query)
+	out, err := cfg.Target.run(script, nil)
+	if err != nil {
+		return f, fmt.Errorf("read %s: %w", cfg.Host, err)
 	}
+	sec := sections(string(out))
+	queued := parseSqueue(sec["squeue"])
+	maps.Copy(f.states, judge(query, parseSacct(sec["sacct"]), queued, time.Now()))
 	seen, err := readSeen(root)
 	if err != nil {
 		return f, err
@@ -51,14 +56,58 @@ func refresh(root string, cfg Config, prev fresh) (fresh, error) {
 			}
 		}
 	}
-	dir, err := cfg.Target.resolve()
-	if err != nil {
-		return f, err
+	dir := strings.TrimSpace(sec["dir"])
+	snaps := parseSizes(sec["sizes"])
+	var owned []Job
+	var unknown []Job
+	for _, j := range journal {
+		if j.Host != cfg.Host || !slices.ContainsFunc(snaps, func(s snapSize) bool { return ofCommit(j, s.Commit) }) {
+			continue
+		}
+		owned = append(owned, j)
+		if _, ok := f.states[j.Job]; !ok {
+			unknown = append(unknown, j)
+		}
 	}
-	f.snaps, err = loadSnapshots(root, cfg, dir)
-	if err != nil {
-		f.snaps = prev.snaps
-		return f, fmt.Errorf("snapshots on %s: %w", cfg.Host, err)
+	if len(unknown) > 0 {
+		states, _, err := fetchStates(cfg.Target, unknown, time.Now())
+		if err != nil {
+			return f, fmt.Errorf("states on %s: %w", cfg.Host, err)
+		}
+		maps.Copy(f.states, states)
 	}
+	var dirs []string
+	for _, d := range queued {
+		dirs = append(dirs, d...)
+	}
+	f.snaps = classify(snaps, owned, f.states, dirs, dir, strayOf(root, cfg, sec["files"]))
 	return f, nil
+}
+
+func sections(out string) map[string]string {
+	found := map[string]string{}
+	for _, part := range strings.Split(out, sectionMark)[1:] {
+		name, body, _ := strings.Cut(part, "\n")
+		found[name] = body
+	}
+	return found
+}
+
+// refreshScript is the one command that reads the states, the queue and the snapshots of a target.
+func refreshScript(t Target, query []Job) string {
+	dir := quoteDir(t.Dir)
+	var b strings.Builder
+	b.WriteString("rc=0; ")
+	if len(query) > 0 {
+		ids := make([]string, len(query))
+		for i, j := range query {
+			ids[i] = j.Job
+		}
+		fmt.Fprintf(&b, "echo '%ssacct'; sacct -j %s -X -n -P --format=JobID,State || rc=1; ", sectionMark, quote(strings.Join(ids, ",")))
+	}
+	fmt.Fprintf(&b, "echo '%ssqueue'; squeue -h -u \"$(id -un)\" -o '%%i|%%Z' || rc=1; ", sectionMark)
+	fmt.Fprintf(&b, "echo '%sdir'; mkdir -p %s && cd %s && pwd || exit 1; ", sectionMark, dir, dir)
+	fmt.Fprintf(&b, "echo '%ssizes'; %s || rc=1; ", sectionMark, sizesScript)
+	fmt.Fprintf(&b, "echo '%sfiles'; for c in $(%s); do find \"$c\" -type f -print0; done || rc=1; exit $rc", sectionMark, commitDirs)
+	return b.String()
 }

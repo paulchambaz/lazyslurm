@@ -74,3 +74,27 @@ func TestDetailTexts(t *testing.T) {
 		t.Errorf("host lines = %q", got)
 	}
 }
+
+func TestJobLineIsShortAndColored(t *testing.T) {
+	m := testModel()
+	got := m.jobLine(m.jobs[0])
+	for _, want := range []string{"12", "11-11 10:02", "train.sh", "\x1b[36m1 RUNNING\x1b[0m"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("job line %q lacks %q", got, want)
+		}
+	}
+	if strings.Contains(got, "slurm/") {
+		t.Errorf("job line %q keeps the directory", got)
+	}
+	if stateColor("FAILED") != red || stateColor("COMPLETED") != green || stateColor("PENDING") != yellow {
+		t.Error("state colors")
+	}
+}
+
+func TestActiveCountsJobsNotFinal(t *testing.T) {
+	m := testModel()
+	m.states["11"] = jobState{Final: true}
+	if m.active() != 1 {
+		t.Errorf("active = %d, want 1", m.active())
+	}
+}

@@ -61,13 +61,16 @@ func TestLayoutDrawsEveryView(t *testing.T) {
 		}
 	}
 	v, _ := u.g.View("hosts")
-	if u.g.CurrentView() != v || !strings.Contains(v.Buffer(), "* h") {
-		t.Errorf("hosts view = %q, current %v", v.Buffer(), u.g.CurrentView())
+	if !strings.Contains(v.Buffer(), "* h") {
+		t.Errorf("hosts view = %q", v.Buffer())
+	}
+	if jobs, _ := u.g.View("jobs"); u.g.CurrentView() != jobs {
+		t.Errorf("current view = %v, want jobs", u.g.CurrentView())
 	}
 	if len(v.FrameRunes) != 6 || v.FrameRunes[2] != '╭' {
 		t.Errorf("frame = %q, want rounded corners", string(v.FrameRunes))
 	}
-	if o, _ := u.g.View(optionsView); !strings.Contains(o.Buffer(), "q quit") {
+	if o, _ := u.g.View(optionsView); !strings.Contains(o.Buffer(), "Help: ?") {
 		t.Errorf("options = %q", o.Buffer())
 	}
 }
@@ -253,5 +256,32 @@ func TestHostListFallsBackToTheFirstHost(t *testing.T) {
 	}
 	if _, host, _ = hostList(root, "b"); host != "b" {
 		t.Errorf("host = %q, want b", host)
+	}
+}
+
+func TestWrapLogKeepsEveryRuneAndColors(t *testing.T) {
+	got := wrapLog([]string{"$ abcdefgh", "error: x", "plain"}, 5)
+	if len(got) != 5 {
+		t.Fatalf("wrapped = %q, want 5 rows", got)
+	}
+	if got[0] != paint(cyan, "$ abc") || got[1] != paint(cyan, "defgh") || got[2] != paint(red, "error") || got[4] != "plain" {
+		t.Errorf("wrapped = %q", got)
+	}
+}
+
+func TestOptionsFollowTheFocusAndColonOpensTheCommandPopup(t *testing.T) {
+	root := scriptRepo(t, "")
+	u := newTestTUI(t, root)
+	u.focusOn(snapsPanel)
+	if o := u.options(120); !strings.Contains(o, "Drop: d") || strings.Contains(o, "Cancel: c") {
+		t.Errorf("snapshots options = %q", o)
+	}
+	u.focusOn(jobsPanel)
+	if o := u.options(120); !strings.Contains(o, "Cancel: c") || !strings.Contains(o, "Cmd: :") {
+		t.Errorf("jobs options = %q", o)
+	}
+	u.exec()
+	if u.pop == nil || u.pop.kind != inputPopup || u.pop.title != "Command in work/" {
+		t.Errorf("popup = %v", u.pop)
 	}
 }

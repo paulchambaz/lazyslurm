@@ -40,16 +40,22 @@ func ofCommit(j Job, commit string) bool {
 	return j.Commit != "" && strings.HasPrefix(commit, j.Commit)
 }
 
+const commitDirs = `ls -tr | grep -E '^[0-9a-f]{40}$'`
+
+const sizesScript = `{ [ -d work ] && echo work; ` + commitDirs + `; true; } | xargs -r du -sk --`
+
 // listSnapshots lists the snapshots of dir, oldest first, with the disk each one costs beyond work/.
 func listSnapshots(t Target, dir string) ([]snapSize, error) {
-	out, err := t.run(fmt.Sprintf(
-		`cd %s && { [ -d work ] && echo work; ls -tr | grep -E '^[0-9a-f]{40}$'; true; } | xargs -r du -sk --`,
-		quote(dir)), nil)
+	out, err := t.run("cd "+quote(dir)+" && "+sizesScript, nil)
 	if err != nil {
 		return nil, fmt.Errorf("list snapshots: %w", err)
 	}
+	return parseSizes(string(out)), nil
+}
+
+func parseSizes(out string) []snapSize {
 	var snaps []snapSize
-	for line := range strings.SplitSeq(string(out), "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		size, name, ok := strings.Cut(line, "\t")
 		kb, err := strconv.Atoi(size)
 		if !ok || err != nil || !commitName.MatchString(name) {
@@ -57,7 +63,7 @@ func listSnapshots(t Target, dir string) ([]snapSize, error) {
 		}
 		snaps = append(snaps, snapSize{name, kb})
 	}
-	return snaps, nil
+	return snaps
 }
 
 func treeFiles(root string, cfg Config, commit string) map[string]bool {
@@ -85,17 +91,21 @@ func collected(rel string) bool {
 
 // strayFiles lists, by commit, the files of each snapshot that the commit and the keep paths do not explain.
 func strayFiles(root string, cfg Config, dir string, commits []string) (map[string][]string, error) {
-	stray := map[string][]string{}
 	if len(commits) == 0 {
-		return stray, nil
+		return map[string][]string{}, nil
 	}
 	out, err := cfg.Target.run(fmt.Sprintf(
 		`cd %s && for c in %s; do find "$c" -type f -print0; done`, quote(dir), quoteAll(commits)), nil)
 	if err != nil {
 		return nil, fmt.Errorf("list snapshot files: %w", err)
 	}
+	return strayOf(root, cfg, string(out)), nil
+}
+
+func strayOf(root string, cfg Config, files string) map[string][]string {
+	stray := map[string][]string{}
 	expected := map[string]map[string]bool{}
-	for path := range strings.SplitSeq(string(out), "\x00") {
+	for path := range strings.SplitSeq(files, "\x00") {
 		commit, rel, ok := strings.Cut(path, "/")
 		if !ok {
 			continue
@@ -111,7 +121,7 @@ func strayFiles(root string, cfg Config, dir string, commits []string) (map[stri
 	for _, files := range stray {
 		slices.Sort(files)
 	}
-	return stray, nil
+	return stray
 }
 
 // classify applies the deletion rules of the design to each snapshot of dir.

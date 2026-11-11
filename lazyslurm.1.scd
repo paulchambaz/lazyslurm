@@ -121,9 +121,9 @@ It refreshes every 120 seconds and on *R*.
 	Submit: pick a script from *scripts*, then type its arguments, the sbatch
 	options and a note, then confirm.
 
-*x*
-	Run a command with *srun*, as *exec* does. The UI steps aside until the
-	command ends.
+*:*
+	Type a command and run it in _work/_ with *srun*, as *exec* does. The UI
+	steps aside, shows the output, and comes back on *enter*.
 
 *r* *c*
 	Retry, cancel the selected job, after a confirmation.

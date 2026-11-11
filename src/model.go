@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 )
 
 type panel int
@@ -32,6 +35,7 @@ type model struct {
 	filter string
 	busy   bool
 	logs   map[string]string
+	at     time.Time
 }
 
 func (m *model) visibleJobs() []Job {
@@ -84,12 +88,66 @@ func (m *model) snap() (snapshotInfo, bool) {
 	return m.snaps[m.sel[snapsPanel]], true
 }
 
+const (
+	grey   = "90"
+	red    = "31"
+	green  = "32"
+	yellow = "33"
+	cyan   = "36"
+)
+
+func paint(code, s string) string {
+	return "\x1b[" + code + "m" + s + "\x1b[0m"
+}
+
+func stateColor(state string) string {
+	switch {
+	case strings.HasPrefix(state, "COMPLETED"):
+		return green
+	case strings.HasPrefix(state, "RUNNING"), strings.HasPrefix(state, "COMPLETING"):
+		return cyan
+	case strings.HasPrefix(state, "PENDING"), strings.HasPrefix(state, "CONFIGURING"), strings.HasPrefix(state, "REQUEUED"):
+		return yellow
+	}
+	return red
+}
+
+func coloredCounts(states map[string]int) string {
+	names := make([]string, 0, len(states))
+	for name := range states {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	parts := make([]string, len(names))
+	for i, name := range names {
+		parts[i] = paint(stateColor(name), fmt.Sprintf("%d %s", states[name], name))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func shortTime(t string) string {
+	if len(t) < 16 {
+		return t
+	}
+	return t[5:10] + " " + t[11:16]
+}
+
 func (m *model) jobLine(j Job) string {
-	line := j.Job + "  " + j.Time[:min(len(j.Time), 16)] + "  " + j.Script
+	line := j.Job + "  " + paint(grey, shortTime(j.Time)) + "  " + filepath.Base(j.Script)
 	if st, ok := m.states[j.Job]; ok && len(st.States) > 0 {
-		line += "  " + countsText(st.States)
+		line += "  " + coloredCounts(st.States)
 	}
 	return line
+}
+
+func (m *model) active() int {
+	n := 0
+	for _, st := range m.states {
+		if !st.Final {
+			n++
+		}
+	}
+	return n
 }
 
 func snapLine(s snapshotInfo) string {

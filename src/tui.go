@@ -25,7 +25,7 @@ const (
 
 var panelViews = [panelCount]string{"hosts", "jobs", "snaps"}
 
-var panelTitles = [panelCount]string{"1 Hosts", "2 Jobs", "3 Snapshots"}
+var panelTitles = [panelCount]string{"[1]-Hosts", "[2]-Jobs", "[3]-Snapshots"}
 
 const helpText = ` 1 2 3  [ ]  tab   go to a panel
  j k  arrows       move
@@ -35,7 +35,7 @@ const helpText = ` 1 2 3  [ ]  tab   go to a panel
  R                 refresh now
  P  p              push, pull
  s                 submit a script
- x                 run a command with srun
+ :                 run a command with srun in work/
  r  c              retry, cancel the selected job
  l                 read the log of the selected job
  d                 drop the selected snapshot
@@ -113,7 +113,7 @@ type tui struct {
 
 func newTUI(g *gocui.Gui, root string, hosts []string, host string, cfg Config) *tui {
 	u := &tui{g: g, log: &logbuf{}}
-	u.m = &model{root: root, hosts: hosts, host: host, cfg: cfg, logs: map[string]string{}}
+	u.m = &model{root: root, hosts: hosts, host: host, cfg: cfg, focus: jobsPanel, logs: map[string]string{}}
 	u.post = func(f func()) {
 		g.Update(func(*gocui.Gui) error {
 			f()
@@ -159,7 +159,8 @@ func runTUI(root, hostFlag string) error {
 }
 
 func (u *tui) trace(line string) {
-	u.log.add("$ " + strings.Join(strings.Fields(line), " "))
+	line = strings.ReplaceAll(strings.Join(strings.Fields(line), " "), `'\''`, `'`)
+	u.log.add("$ " + strings.Replace(line, "ssh -o BatchMode=yes ", "ssh ", 1))
 }
 
 func (u *tui) idle() bool {
@@ -194,15 +195,18 @@ func (u *tui) start(label string, work func() error, apply func()) {
 func (u *tui) finish(label string, err error, f fresh, rerr error, apply func()) {
 	u.m.busy = false
 	u.m.fresh = f
+	if rerr == nil {
+		u.m.at = time.Now()
+	}
 	u.m.clamp()
 	if apply != nil {
 		apply()
 	}
 	if err != nil {
-		u.log.add(label + ": " + err.Error())
+		u.log.add("error: " + label + ": " + err.Error())
 	}
 	if rerr != nil {
-		u.log.add("refresh: " + rerr.Error())
+		u.log.add("error: refresh: " + rerr.Error())
 	}
 	if u.auto {
 		if u.timer != nil {
@@ -413,7 +417,7 @@ func (u *tui) exec() error {
 	if !u.idle() {
 		return nil
 	}
-	u.open(&popup{kind: inputPopup, title: "Command", ok: func(line string) {
+	u.open(&popup{kind: inputPopup, title: "Command in work/", ok: func(line string) {
 		if line == "" {
 			return
 		}
@@ -464,7 +468,7 @@ func (u *tui) bind() error {
 		{'P', u.push},
 		{'p', u.pull},
 		{'s', u.submit},
-		{'x', u.exec},
+		{':', u.exec},
 		{'r', u.retry},
 		{'c', u.cancel},
 		{'l', u.logsOf},
@@ -570,17 +574,61 @@ func showList(v *gocui.View, lines []string, sel int) {
 	oy := max(0, sel-v.InnerHeight()+1)
 	v.SetOrigin(0, oy)
 	v.SetCursor(0, sel-oy)
+	v.Footer = ""
+	if len(lines) > 0 {
+		v.Footer = fmt.Sprintf("%d of %d", sel+1, len(lines))
+	}
 }
 
-func (u *tui) options() string {
-	s := "P push  p pull  s submit  x exec  r retry  c cancel  l logs  d drop  / filter  R refresh  ? help  q quit"
+var panelKeys = [panelCount]string{
+	"Select: enter | Push: P | Pull: p | Cmd: : | Refresh: R | Help: ?",
+	"Log: l | Submit: s | Retry: r | Cancel: c | Push: P | Pull: p | Filter: / | Cmd: : | Help: ?",
+	"Drop: d | Push: P | Pull: p | Cmd: : | Refresh: R | Help: ?",
+}
+
+func (u *tui) options(width int) string {
+	left := panelKeys[u.m.focus]
 	if u.m.filter != "" {
-		s = "filter: " + u.m.filter + "  " + s
+		left = "filter: " + u.m.filter + " | " + left
+	}
+	right := fmt.Sprintf("%d active", u.m.active())
+	if !u.m.at.IsZero() {
+		right += " | " + u.m.at.Format("15:04")
 	}
 	if u.m.busy {
-		s = "working...  " + s
+		right = "working... | " + right
 	}
-	return s
+	pad := width - len([]rune(left)) - len([]rune(right)) - 2
+	if pad < 1 {
+		return paint(cyan, left)
+	}
+	return paint(cyan, left) + strings.Repeat(" ", pad) + paint(grey, right)
+}
+
+func wrapLog(lines []string, width int) []string {
+	var out []string
+	for _, l := range lines {
+		code := ""
+		switch {
+		case strings.HasPrefix(l, "$ "):
+			code = cyan
+		case strings.HasPrefix(l, "error: "):
+			code = red
+		case strings.HasPrefix(l, "busy: "):
+			code = yellow
+		}
+		runes := []rune(l)
+		for first := true; first || len(runes) > 0; first = false {
+			n := min(len(runes), max(width, 1))
+			chunk := string(runes[:n])
+			runes = runes[n:]
+			if code != "" {
+				chunk = paint(code, chunk)
+			}
+			out = append(out, chunk)
+		}
+	}
+	return out
 }
 
 func (u *tui) layout(g *gocui.Gui) error {
@@ -592,11 +640,15 @@ func (u *tui) layout(g *gocui.Gui) error {
 	left := max(w/3, 24)
 	rows := h - 1
 	hostsEnd := min(len(m.hosts), 3) + 2
-	snapsStart := rows - 7
+	free := rows - hostsEnd
+	jobsEnd := hostsEnd + free*2/3
+	if m.focus == snapsPanel {
+		jobsEnd = hostsEnd + free/3
+	}
 	mainEnd := rows * 2 / 3
-	g.Highlight, g.SelFrameColor = true, gocui.ColorGreen
+	g.Highlight, g.SelFrameColor = true, gocui.ColorGreen|gocui.AttrBold
 	lists := [panelCount][]string{m.hostLines(), m.jobLines(), m.snapLines()}
-	spans := [panelCount][2]int{{0, hostsEnd - 1}, {hostsEnd, snapsStart - 1}, {snapsStart, rows - 1}}
+	spans := [panelCount][2]int{{0, hostsEnd - 1}, {hostsEnd, jobsEnd - 1}, {jobsEnd, rows - 1}}
 	for p := range panelCount {
 		v, _, err := place(g, panelViews[p], 0, spans[p][0], left-1, spans[p][1])
 		if err != nil {
@@ -620,14 +672,15 @@ func (u *tui) layout(g *gocui.Gui) error {
 	}
 	v.Title = "Log"
 	v.Clear()
-	fmt.Fprint(v, strings.Join(u.log.tail(v.InnerHeight()), "\n"))
+	wrapped := wrapLog(u.log.tail(logTail), v.InnerWidth())
+	fmt.Fprint(v, strings.Join(wrapped[max(0, len(wrapped)-v.InnerHeight()):], "\n"))
 	v, _, err = place(g, optionsView, -1, h-2, w, h)
 	if err != nil {
 		return err
 	}
 	v.Frame = false
 	v.Clear()
-	fmt.Fprint(v, u.options())
+	fmt.Fprint(v, u.options(w))
 	if err := u.drawPopup(g, w, h); err != nil {
 		return err
 	}
