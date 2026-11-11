@@ -93,8 +93,10 @@ Without a command, the UI opens. See *THE UI*.
 
 *clean*
 	Delete from _keep/_ on the target the outputs already in the repository, as
-	listed by the *clean* key of the host: each entry is a path _DIR/{job}_,
-	and every subfolder of _DIR_ named after a Slurm job id is one run, so the
+	listed by the *clean* key of the host: each entry is a path _DIR/{job}_, where
+	_DIR_ may hold *\**, *?* and *[...]* (_outputs/\*/{job}_), each matching inside one
+	path component but not in the *keep* part. Every subfolder of a matching
+	_DIR_ named after a Slurm job id is one run, so the
 	scripts must write under the id (_$SLURM_ARRAY_JOB_ID_ for an array). A run
 	is deleted only when it is a real directory, its job is in the journal of
 	the host, every task of the job is in a final state, and an *rsync* dry run

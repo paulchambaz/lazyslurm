@@ -257,7 +257,7 @@ func validate(c *Config) error {
 	}
 	for i, p := range c.Clean {
 		parent, ok := strings.CutSuffix(p, "/"+jobToken)
-		if !ok || strings.Contains(parent, jobToken) || badPath(parent) || !insideAny(filepath.Clean(parent), c.Keep) {
+		if !ok || strings.ContainsAny(parent, "{}\\") || badPath(parent) || badGlob(parent) || !insideAny(filepath.Clean(parent), c.Keep) {
 			return fmt.Errorf("clean: %q must be a path inside a keep path, ending in /%s", p, jobToken)
 		}
 		c.Clean[i] = filepath.Clean(parent) + "/" + jobToken
@@ -271,6 +271,11 @@ func validate(c *Config) error {
 		}
 	}
 	return nil
+}
+
+func badGlob(p string) bool {
+	_, err := filepath.Match(p, "")
+	return err != nil
 }
 
 func insideAny(path string, dirs []string) bool {

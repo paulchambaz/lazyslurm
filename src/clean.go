@@ -17,27 +17,48 @@ import (
 
 var jobName = regexp.MustCompile(`^[0-9]+$`)
 
-const parentsScript = `cd %s || exit 1; keep=$(pwd -P); for p in %s; do
-[ -d "$p" ] && [ ! -L "$p" ] || continue
-case "$(cd "$p" && pwd -P)/" in "$keep"/*) ;; *) continue ;; esac
-find "$p" -mindepth 1 -maxdepth 1 -type d -printf '%%p\0'
-done`
+const scanScript = `cd %s || exit 1; keep=$(pwd -P)
+scan() {
+[ -d "$1" ] && [ ! -L "$1" ] || return 0
+case "$(cd "$1" && pwd -P)/" in "$keep"/*) ;; *) return 0 ;; esac
+find "$1" -mindepth "$2" -maxdepth "$2" -type d -printf '%%p\0'
+}
+%s`
+
+const globChars = "*?["
 
 type cleanItem struct {
 	Path string
 	KB   int
 }
 
-func cleanParents(cfg Config) []string {
-	parents := make([]string, len(cfg.Clean))
-	for i, p := range cfg.Clean {
-		parents[i] = strings.TrimSuffix(p, "/"+jobToken)
+func cleanParent(pattern string) string {
+	return strings.TrimSuffix(pattern, "/"+jobToken)
+}
+
+func cleanScan(pattern string) (start string, depth int) {
+	parts := strings.Split(cleanParent(pattern), "/")
+	i := slices.IndexFunc(parts, func(c string) bool { return strings.ContainsAny(c, globChars) })
+	if i < 0 {
+		i = len(parts)
 	}
-	return parents
+	return strings.Join(parts[:i], "/"), len(parts) - i + 1
+}
+
+func cleanScans(cfg Config) string {
+	var b strings.Builder
+	for _, p := range cfg.Clean {
+		start, depth := cleanScan(p)
+		fmt.Fprintf(&b, "scan %s %d\n", quote(start), depth)
+	}
+	return b.String()
 }
 
 func cleanable(cfg Config, path string) bool {
-	return jobName.MatchString(filepath.Base(path)) && slices.Contains(cleanParents(cfg), filepath.Dir(path))
+	return jobName.MatchString(filepath.Base(path)) && slices.ContainsFunc(cfg.Clean, func(p string) bool {
+		ok, err := filepath.Match(cleanParent(p), filepath.Dir(path))
+		return err == nil && ok
+	})
 }
 
 func rsyncOut(stdin io.Reader, args ...string) (string, error) {
@@ -51,7 +72,7 @@ func rsyncOut(stdin io.Reader, args ...string) (string, error) {
 }
 
 func cleanCandidates(root string, cfg Config, dir string) ([]string, map[string]Job, error) {
-	out, err := cfg.Target.run(fmt.Sprintf(parentsScript, quote(dir+"/keep"), quoteAll(cleanParents(cfg))), nil)
+	out, err := cfg.Target.run(fmt.Sprintf(scanScript, quote(dir+"/keep"), cleanScans(cfg)), nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list outputs: %w", err)
 	}
@@ -74,7 +95,7 @@ func cleanCandidates(root string, cfg Config, dir string) ([]string, map[string]
 		}
 	}
 	slices.Sort(paths)
-	return paths, jobs, nil
+	return slices.Compact(paths), jobs, nil
 }
 
 func cleanFinished(cfg Config, paths []string, jobs map[string]Job) ([]string, error) {

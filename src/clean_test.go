@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -156,6 +157,62 @@ func TestCleanIgnoresAParentLeavingKeep(t *testing.T) {
 	}
 }
 
+func TestCleanScan(t *testing.T) {
+	tests := []struct {
+		pattern string
+		start   string
+		depth   int
+	}{
+		{"outputs/logs/{job}", "outputs/logs", 1},
+		{"outputs/*/{job}", "outputs", 2},
+		{"outputs/*/*/{job}", "outputs", 3},
+		{"outputs/a*/b/{job}", "outputs", 3},
+		{"outputs/{job}", "outputs", 1},
+	}
+	for _, tt := range tests {
+		if start, depth := cleanScan(tt.pattern); start != tt.start || depth != tt.depth {
+			t.Errorf("cleanScan(%q) = %q, %d, want %q, %d", tt.pattern, start, depth, tt.start, tt.depth)
+		}
+	}
+}
+
+func TestCleanGlobMatchesOneComponentEach(t *testing.T) {
+	for name, tg := range testTargets(t) {
+		setupFakeSlurm(t)
+		root := jobRepo(t, tg, "clean = [\"outputs/*/{job}\", \"outputs/logs/{job}\"]\n")
+		if _, err := submit(root, "slurm/run.sh"); err != nil {
+			t.Fatal(err)
+		}
+		dir, err := tg.resolve()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fake := os.Getenv("FAKE_SLURM")
+		write(t, filepath.Join(fake, "sacct"), "100|COMPLETED\n")
+		out := filepath.Join(dir, "keep", "outputs")
+		for _, p := range []string{"logs/100/a", "weights/100/w", "graphs/100/g", "logs/deep/100/d", "100/top"} {
+			write(t, filepath.Join(out, p), p+"\n")
+		}
+		for _, p := range []string{"logs/100", "weights/100"} {
+			if err := os.MkdirAll(filepath.Join(root, "outputs", filepath.Dir(p)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if b, err := exec.Command("cp", "-a", filepath.Join(out, p), filepath.Join(root, "outputs", p)).CombinedOutput(); err != nil {
+				t.Fatalf("cp: %v\n%s", err, b)
+			}
+		}
+		got, err := clean(root, confirmer{Yes: true})
+		if err != nil || !strings.HasPrefix(got, "cleaned 2 runs on h (") {
+			t.Fatalf("%s: clean = %q, %v", name, got, err)
+		}
+		for p, deleted := range map[string]bool{"logs/100": true, "weights/100": true, "graphs/100": false, "logs/deep/100": false, "100": false} {
+			if exists(filepath.Join(out, p)) == deleted {
+				t.Errorf("%s: %s deleted = %v, want %v", name, p, !deleted, deleted)
+			}
+		}
+	}
+}
+
 func TestCleanDeletesNothingWhenSlurmFails(t *testing.T) {
 	for name, tg := range testTargets(t) {
 		root, dir, fake := cleanRepo(t, tg, "100|COMPLETED\n")
@@ -241,15 +298,15 @@ func TestNotPulledReadsRsyncItemizedChanges(t *testing.T) {
 
 func TestCleanKeyIsValidated(t *testing.T) {
 	for _, key := range []string{`["outputs/logs/{job}/x"]`, `["outputs/{job}/logs/{job}"]`, `["/outputs/{job}"]`,
-		`["other/{job}"]`, `["{job}"]`, `["outputs/../x/{job}"]`, `["outputs/logs"]`} {
+		`["other/{job}"]`, `["{job}"]`, `["outputs/../x/{job}"]`, `["*/{job}"]`, `["out*/x/{job}"]`, `["outputs/[/{job}"]`, `["outputs/a\\b/{job}"]`, `["outputs/logs"]`} {
 		root := jobRepo(t, Target{Dir: filepath.Join(t.TempDir(), "t")}, "clean = "+key+"\n")
 		if _, err := loadConfig(root, ""); err == nil || !strings.Contains(err.Error(), "clean:") {
 			t.Errorf("clean = %s: err = %v", key, err)
 		}
 	}
-	root := jobRepo(t, Target{Dir: filepath.Join(t.TempDir(), "t")}, "clean = [\"outputs//logs/./{job}\", \"outputs/{job}\"]\n")
+	root := jobRepo(t, Target{Dir: filepath.Join(t.TempDir(), "t")}, "clean = [\"outputs//logs/./{job}\", \"outputs/{job}\", \"outputs/*/{job}\"]\n")
 	cfg, err := loadConfig(root, "")
-	if err != nil || len(cfg.Clean) != 2 || cfg.Clean[0] != "outputs/logs/{job}" || cfg.Clean[1] != "outputs/{job}" {
+	if err != nil || len(cfg.Clean) != 3 || cfg.Clean[0] != "outputs/logs/{job}" || cfg.Clean[1] != "outputs/{job}" || cfg.Clean[2] != "outputs/*/{job}" {
 		t.Errorf("clean = %v, %v", cfg.Clean, err)
 	}
 }
